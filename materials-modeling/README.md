@@ -8,3 +8,5 @@ The code includes
 	- Spin-projected bands
 * Berry Curvature calculation
 * Density of States
+
+# Haldane Model
