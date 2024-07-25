@@ -1,0 +1,3 @@
+# Some of usual not useful files
+__pycache__
+*.dat
