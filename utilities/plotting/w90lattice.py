@@ -1,10 +1,51 @@
 #!/usr/bin/env python3
+
+'''
+    This script contains some options for plotting the Wannier Centers
+    using the seedname_tb.dat file of a wannierized system.
+
+    Plot Options:
+    1: plot x and y positions colored with z position
+    2: plot xyz position in a 3D interactive plot using plotly -- needs atomic positions
+    3: plots x and y positions colored by their index on the matrix 
+    
+    Every option plots the diagonal of the (0,0,0) cell!
+'''
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import matplotlib.colors as mcolors
 import sys
 
+#===============================================================#
+# Edit this for the 3D interactive plot -- or make it all zero
+# Atomic positions (cartesian)
+atoms = {
+    "In": np.array([
+        [ 0.000000000, 0.000000000, 1.826367950],
+        [-2.080885887, 3.604200081, 1.826367950],
+        [ 4.161771774, 0.000000000, 1.826367950],
+        [ 2.080885887, 3.604200081, 1.826367950],
+        [-0.000000000, 2.402800126, 7.143893029]
+    ]),
+    "Se": np.array([
+        [ 2.080885949, 1.201400063, 0.000000000],
+        [ 0.000000000, 0.000000000, 5.022511864],
+        [-2.080885887, 3.604200081, 5.022511864],
+        [ 4.161771774, 0.000000000, 5.022511864],
+        [ 2.080885887, 3.604200081, 5.022511864],
+        [ 2.080885949, 1.201400063, 9.131839752]
+    ])
+}
+center_atom = atoms["Se"][0]  # Choosing first Se atom as center
+for element in atoms:
+    atoms[element] -= center_atom  # Shift all atoms
+
+# Define colors for the atoms
+colors = {"In": "purple", "Se": "green"}
+
+#===============================================================#
+# PARSER
 filename = sys.argv[1]
 # bond_length = sys.argv[2]
 def parse_file(filename):
@@ -93,6 +134,9 @@ def parse_file(filename):
     return np.array(bravais_vectors), nFock, mSize, iRn, H, WF, diag  # Second set of Fock matrices (nFock x mSize x mSize x 3)
 
 #==============================================================#
+#==========================PLOTTING============================#
+#==============================================================#
+
 # Create the plot
 def map_to_real_space(iRn, bravais_vectors):
     """
@@ -149,7 +193,7 @@ def plot_orbitals_Ncoded(iRn, bravais_vectors, WF):
 #============================================================================#
 def plot_orbitals_indexCoded(iRn, bravais_vectors, WF, n_index):
     """
-    Plot a single n block with a gradient color mapping.
+    Plot the diagonal elements of a single n block with a discrete color mapping.
     
     Parameters:
         iRn: Real-space lattice positions.
@@ -160,51 +204,45 @@ def plot_orbitals_indexCoded(iRn, bravais_vectors, WF, n_index):
     # Map iRn to real-space positions
     real_space_positions = map_to_real_space(iRn, bravais_vectors)
 
-    # Extract orbital positions from WF for the chosen block
-    orbital_positions = WF[n_index, :, :, :2]  # Only X and Y components for 2D
-
-    # Flatten the data for plotting
-    points = []
-    for j in range(orbital_positions.shape[0]):
-        for k in range(orbital_positions.shape[1]):
-            pos = real_space_positions[n_index, :2] + orbital_positions[-j, -k, :2]
-            points.append(pos)
-
-    points = np.array(points)
+    # Extract only the diagonal elements from WF for the chosen block
+    orbital_positions = np.array([WF[n_index, i, i, :2] for i in range(min(WF.shape[1], WF.shape[2]))])
     
-    # Generate gradient colors based on an index (e.g., sequential order)
-    color_values = np.linspace(0, 1, points.shape[0])  # Normalize from 0 to 1
-    cmap = cm.get_cmap('viridis')  # Choose a gradient colormap
-    colors = cmap(color_values)
-
+    # Compute positions
+    points = real_space_positions[n_index, :2] + orbital_positions
+    
+    # Create a discrete colormap with as many colors as points
+    num_points = points.shape[0]
+    cmap = cm.get_cmap('viridis', num_points)  # Discrete colormap
+    norm = mcolors.BoundaryNorm(boundaries=np.arange(num_points+1)-0.5, ncolors=num_points)
+    
     # Create figure
     fig, ax = plt.subplots(figsize=(8, 8))
     
-    # Scatter plot with gradient colors
-    sc = ax.scatter(points[:, 0], points[:, 1], c=color_values, cmap=cmap, s=8**2, alpha=0.6)
+    # Scatter plot with discrete colors
+    sc = ax.scatter(points[:, 0], points[:, 1], c=np.arange(num_points), cmap=cmap, norm=norm, s=8**2, alpha=0.6)
     ax.scatter(points[0, 0], points[0, 1], c='black', marker='x', s=10**2, label='r=0')
 
-    # Colorbar to show the gradient meaning
-    cbar = plt.colorbar(sc, fraction=0.040, pad=0.04, ax=ax)
+    # Colorbar to show the discrete mapping
+    cbar = plt.colorbar(sc, fraction=0.040, pad=0.04, ax=ax, ticks=np.arange(num_points))
+    cbar.set_label("Index")
 
     ax.set_facecolor('gainsboro')
     # Labels and formatting
-    ax.set_xlabel(f'X ($\\AA$)',fontsize=16)
-    ax.set_ylabel(f'Y ($\\AA$)',fontsize=16)
-    ax.set_title(f'motif for $R = 0,0,0$ cell',fontsize=16)
-    # ax.set_aspect('equal')
+    ax.set_xlabel(f'X ($\\AA$)', fontsize=16)
+    ax.set_ylabel(f'Y ($\\AA$)', fontsize=16)
+    ax.set_title(f'motif for $R = 0,0,0$ cell', fontsize=16)
     
     plt.legend()
     plt.tight_layout()
-    plt.savefig("motif_center.png", dpi=300)
+    plt.savefig("motif_index.png", dpi=300)
     plt.show()
 #============================================================================#
 
 #============================================================================#
 
-def plot_WF_xyz(iRn, bravais_vectors, WF, n_index):
+def plot_WF_xy_zcolor(iRn, bravais_vectors, WF, n_index):
     """
-    Plot a single n block of orbital localizations in 2D (X vs. Y) with the Z coordinate
+    Plot the diagonal elements of a single n block of orbital localizations in 2D (X vs. Y) with the Z coordinate
     represented by a colormap.
     
     Parameters:
@@ -217,177 +255,29 @@ def plot_WF_xyz(iRn, bravais_vectors, WF, n_index):
     # Map iRn to real-space positions
     real_space_positions = map_to_real_space(iRn, bravais_vectors)
     
-    # Extract orbital positions from WF for the selected block (all X, Y, and Z)
-    orbital_positions = WF[n_index, :, :, :]  # shape (n_orbitals_1, n_orbitals_2, 3)
-    
-    # Create lists to accumulate points and their corresponding Z values
-    points = []
-    z_values = []
-    
-    # For each orbital in the block, compute its full position in the unit cell.
-    for j in range(orbital_positions.shape[0]):
-        for k in range(orbital_positions.shape[1]):
-            # Compute the absolute position by adding the real-space position offset (X,Y) of the block
-            pos_xy = real_space_positions[n_index, :2] + orbital_positions[j, k, :2]
-            points.append(pos_xy)
-            # The Z coordinate is taken directly from the orbital data
-            z_values.append(orbital_positions[j, k, 2])
-    
-    points = np.array(points)
-    z_values = np.array(z_values)
+    # Extract only the diagonal elements from WF for the chosen block
+    orbital_positions = np.array([WF[n_index, i, i, :] for i in range(min(WF.shape[1], WF.shape[2]))])
+    orbital_positions = np.real(orbital_positions)
+
+    # Compute positions
+    points = real_space_positions[n_index, :2] + orbital_positions[:, :2]
+    z_values = orbital_positions[:, 2]
     
     # Create the scatter plot
-    fig, ax = plt.subplots(figsize=(8,8))
+    fig, ax = plt.subplots(figsize=(8, 8))
 
-    # ax.scatter(0, bond_length, marker='X', c='black') # PLOTTING THIS COMPLETELY BREAKS YTICKS??!!
-
-    sc = ax.scatter(points[:, 0], points[:, 1], c=z_values, alpha=0.7,cmap='seismic', s=10**2)
+    sc = ax.scatter(points[:, 0], points[:, 1], c=z_values, alpha=0.7, cmap='seismic', s=10**2)
     cbar = plt.colorbar(sc, fraction=0.040, pad=0.04, ax=ax)
-    cbar.set_label(f"Z coordinate ($\\AA$)", fontsize=16)
+    cbar.set_label(f'Z coordinate ($\\AA$)', fontsize=16)
     ax.set_facecolor('gainsboro')
-
 
     # Set labels, title, and formatting
     ax.set_xlabel(f"X ($\\AA$)", fontsize=16)
     ax.set_ylabel(f"Y ($\\AA$)", fontsize=16)
-    ax.set_title(f'motif for $\\vec R = \\vec 0$ cell',fontsize=16)
-
-    # ax.set_xlim(min(points[:,0])-0.5,max(points[:, 0])+0.5)
-    # ax.set_ylim(min(points[:,1])-0.5,max(points[:, 1])+0.5)
-
-    # yticks = np.arange(min(points[:,1].real)-0.5,max(points[:, 1].real)+0.5, 0.2)
-    # ax.set_yticks(yticks)
-
-    # ax.set_aspect('equal')
+    ax.set_title(f'motif for $\\vec R = \\vec 0$ cell', fontsize=16)
+    
     plt.tight_layout()
-    plt.savefig("motif_center_xyz.png", dpi=300)
-    plt.show()
-#============================================================================#
-
-#============================================================================#
-def plot_WF_xz(iRn, bravais_vectors, WF, n_index):
-    """
-    Plot a single n block of orbital localizations in 2D (X vs. Y) with the Z coordinate
-    represented by a colormap.
-    
-    Parameters:
-        iRn: Lattice translation indices.
-        bravais_vectors: The Bravais lattice vectors.
-        WF: Array with orbital localization information, shape (n, i, j, 3),
-            where the last index holds [X, Y, Z] positions.
-        n_index: Index of the n block to plot.
-    """
-    # Map iRn to real-space positions
-    real_space_positions = map_to_real_space(iRn, bravais_vectors)
-    
-    # Extract orbital positions from WF for the selected block (all X, Y, and Z)
-    orbital_positions = WF[n_index, :, :, :]  # shape (n_orbitals_1, n_orbitals_2, 3)
-    
-    # Create lists to accumulate points and their corresponding Z values
-    points = []
-    y_values = []
-    
-    # For each orbital in the block, compute its full position in the unit cell.
-    for j in range(orbital_positions.shape[0]):
-        for k in range(orbital_positions.shape[1]):
-            # Compute the absolute position by adding the real-space position offset (X,Y) of the block
-            pos_xz = real_space_positions[n_index, 0::2] + orbital_positions[j, k, 0::2]
-            points.append(pos_xz)
-            # The Z coordinate is taken directly from the orbital data
-            y_values.append(orbital_positions[j, k, 1])
-    
-    points = np.array(points)
-    y_values = np.array(y_values)
-    
-    # Create the scatter plot
-    fig, ax = plt.subplots(figsize=(8,8))
-
-    # ax.scatter(0, bond_length, marker='X', c='black') # PLOTTING THIS COMPLETELY BREAKS YTICKS??!!
-
-    sc = ax.scatter(points[:, 0], points[:, 1], c=y_values, alpha=0.7,cmap='seismic', s=10**2)
-    cbar = plt.colorbar(sc, fraction=0.040, pad=0.04, ax=ax)
-    cbar.set_label(f"Z coordinate ($\\AA$)", fontsize=16)
-    ax.set_facecolor('gainsboro')
-
-
-    # Set labels, title, and formatting
-    ax.set_xlabel(f"X ($\\AA$)", fontsize=16)
-    ax.set_ylabel(f"Z ($\\AA$)", fontsize=16)
-    ax.set_title(f'motif for $\\vec R = \\vec 0$ cell',fontsize=16)
-    # ax.set_xlim(min(points[:,0])-0.5,max(points[:, 0])+0.5)
-    # ax.set_ylim(min(points[:,1])-0.5,max(points[:, 1])+0.5)
-
-    # yticks = np.arange(min(points[:,1].real)-0.5,max(points[:, 1].real)+0.5, 0.2)
-    # ax.set_yticks(yticks)
-
-    # ax.set_aspect('equal')
-    plt.tight_layout()
-    plt.savefig("motif_center_xz.png", dpi=300)
-    plt.show()
-#============================================================================#
-
-#============================================================================#
-
-from mpl_toolkits.mplot3d import Axes3D
-
-def plot_WF_3D(iRn, bravais_vectors, WF, index, atomic_positions):
-    """
-    Plot the localization of orbitals within each unit cell in 3D, 
-    with atomic positions overlaid for reference.
-    
-    Parameters:
-    - iRn: Integer lattice vectors defining unit cells.
-    - bravais_vectors: The real-space lattice vectors.
-    - WF: Wannier function positions stored in WF[n, i, j, 3] (last index for x, y, z).
-    - atomic_positions: Array of atomic positions in fractional or real coordinates.
-    """
-    # Map iRn to real-space positions
-    real_space_positions = map_to_real_space(iRn, bravais_vectors)
-
-    # Extract orbital positions from WF
-    orbital_positions = WF[index, :, :, :3]  # Use X, Y, Z components
-
-    # Combine real-space positions with orbital positions
-    combined_positions = []
-    for j in range(orbital_positions.shape[0]):
-        for k in range(orbital_positions.shape[1]):
-            combined_positions.append(real_space_positions[index] + orbital_positions[j, k])
-
-
-    combined_positions = np.array(combined_positions)
-
-    # Extract X, Y, Z positions
-    x, y, z = combined_positions[:, 0], combined_positions[:, 1], combined_positions[:, 2]
-
-    # Create 3D scatter plot
-    fig = plt.figure(figsize=(8, 8))
-    ax = fig.add_subplot(111, projection='3d')
-
-    # Scatter plot for Wannier centers, colored by Z
-    sc = ax.scatter(x, y, z, c=z, cmap='viridis', s=30, alpha=0.8)
-
-    # Overlay atomic positions as large spheres
-    atomic_x, atomic_y, atomic_z = atomic_positions[:, 0], atomic_positions[:, 1], atomic_positions[:, 2]
-    ax.scatter(atomic_x, atomic_y, atomic_z, c='k', marker='o', s=50**2, label='Atoms', alpha=0.3)
-
-    # Labels and title
-    ax.set_xlabel('X ($\\AA$)')
-    ax.set_ylabel('Y ($\\AA$)')
-    ax.set_zlabel('Z ($\\AA$)')
-    # ax.set_title('Wannier Orbital Localizations with Atomic Structure')
-
-    # Colorbar for height (Z) information
-    cbar = plt.colorbar(sc, ax=ax, pad=0.1)
-    cbar.set_label('Z Position ($\\AA$)')
-
-    # Set equal aspect ratio
-    ax.set_box_aspect([1, 1, 1])
-
-    # Show legend
-    ax.legend()
-
-    # Save and display the plot
-    plt.savefig("motif_3d.png", dpi=300)
+    plt.savefig("motif_center_xy_zcolor.png", dpi=300)
     plt.show()
 #============================================================================#
 
@@ -396,7 +286,7 @@ import numpy as np
 import plotly.graph_objects as go
 import webbrowser
 
-def plot_WF_3D_interactive(iRn, bravais_vectors, WF, index, atomic_positions):
+def plot_WF_3D_interactive(iRn, bravais_vectors, WF, n_index, atomic_positions):
     """
     Interactive 3D plot of Wannier function centers with atomic positions.
 
@@ -411,44 +301,47 @@ def plot_WF_3D_interactive(iRn, bravais_vectors, WF, index, atomic_positions):
     # Map iRn to real-space positions
     real_space_positions = map_to_real_space(iRn, bravais_vectors)
 
-    # Extract Wannier function positions for a specific block
-    orbital_positions = WF[index, :, :, :3]  # Select only X, Y, Z components
-    orbital_positions = np.real(orbital_positions)  # Convert to real values
+    # Extract only the diagonal elements from WF for the chosen block
+    orbital_positions = np.array([WF[n_index, i, i, :] for i in range(min(WF.shape[1], WF.shape[2]))])
+    orbital_positions = np.real(orbital_positions)
 
     # Combine real-space positions with orbital positions
-    combined_positions = np.array([
-        real_space_positions[index] + orbital_positions[j, k]
-        for j in range(orbital_positions.shape[0])
-        for k in range(orbital_positions.shape[1])
-    ])
+    points = real_space_positions[n_index, :] + orbital_positions[:, :]
 
     # Extract X, Y, Z coordinates
-    x, y, z = combined_positions[:, 0], combined_positions[:, 1], combined_positions[:, 2]
-
+    x, y, z = points[:, 0], points[:, 1], points[:, 2]
     # Create a 3D scatter plot
-    fig = go.Figure(data=[go.Scatter3d(
-        x=x, y=y, z=z)])
+    fig = go.Figure()
 
     # Add Wannier function centers (color-coded by Z height)
     fig.add_trace(go.Scatter3d(
         x=x, y=y, z=z,
         mode='markers',
-        marker=dict(size=6, color=z, colorscale='viridis', opacity=0.8),
-        name="Wannier Centers"
+        marker=dict(size=6, color=z, colorscale='Bluered', opacity=0.8),
     ))
 
-    # Add atomic positions as large black spheres
-    atomic_x, atomic_y, atomic_z = atomic_positions[:, 0], atomic_positions[:, 1], atomic_positions[:, 2]
+
+    # Plot atoms
+    for element, positions in atoms.items():
+        fig.add_trace(go.Scatter3d(
+            x=positions[:, 0], y=positions[:, 1], z=positions[:, 2],
+            mode='markers', marker=dict(size=6**2, color=colors[element], opacity=0.8),
+            name=element
+        ))
+    # Plot lattice vectors as lines (to preserve the cell perception)
+    a1 = bravais_vectors[0,:]
+    a2 = bravais_vectors[1,:]
+    a3 = np.array([0.00000,0.00000, 9.0000000])
+    lattice_points = np.array([[0, 0, 0], a1, a2, a3, (a1 + a2), (a1 + a3), (a2 + a3), (a1 + a2 + a3)])
     fig.add_trace(go.Scatter3d(
-        x=atomic_x, y=atomic_y, z=atomic_z,
-        mode='markers',
-        marker=dict(size=12, color='black', opacity=0.9, symbol='circle'),
-        name="Atoms"
+        x=lattice_points[:, 0], y=lattice_points[:, 1], z=lattice_points[:, 2],
+        mode='markers', marker=dict(size=3, color="black", symbol='cross'),
+        name="Lattice"
     ))
 
     # Customize layout
     fig.update_layout(
-        title="Wannier Orbital Localizations with Atomic Structure",
+        title="Wannier Functions Localizations with Atomic Structure",
         scene=dict(
             xaxis_title="X (Å)",
             yaxis_title="Y (Å)",
@@ -461,7 +354,7 @@ def plot_WF_3D_interactive(iRn, bravais_vectors, WF, index, atomic_positions):
     # Save and open as an interactive HTML file
     filename = "Wannier3D.html"
     fig.write_html(filename)
-    webbrowser.open(filename)
+    # webbrowser.open(filename)
 
 
 #==============================================
@@ -469,22 +362,18 @@ def plot_WF_3D_interactive(iRn, bravais_vectors, WF, index, atomic_positions):
 # parser
 bravais, nFock, mSize, iRn, H, WF, diag  = parse_file(filename)
 
-# Access the parsed data - testing
-# print("Bravais Vectors:\n", data['bravais_vectors'])
-# print("nFock:", data['nFock'])
-# print("mSize:", data['mSize'])
-# print("First Fock Matrix (Real/Imag):\n", data['H'][0])
-# print("First Fock Matrix (XYZ Components):\n", data['WF'][0])
+plot_option = int(sys.argv[2])
+if plot_option == 1:
+    print("Plotting XY-Zcolor motif")
+    plot_WF_xy_zcolor(iRn, bravais, WF, diag)
+elif plot_option == 2:
+    print("Plotting interactive 3D motif")
+    plot_WF_3D_interactive(iRn, bravais, WF, diag, atoms, colors)
+elif plot_option == 3:
+    print("Plotting index-coded motif")
+    plot_orbitals_indexCoded(iRn, bravais, WF, diag)
 
 # plot_orbitals_Ncoded(iRn, bravais, WF)
-# plot_orbitals_indexCoded(iRn, bravais, WF, diag)
-# plot_WF_xyz(iRn, bravais, WF, diag)
 # plot_WF_xz(iRn, bravais, WF, diag)
 
-atomic_positions = np.array([
-    [0.000, 0.000, 0.000],  # Mo atom at (0,0,0)
-    [-0.915, 1.586, 1.500],  # S atom above Mo
-    [-0.915, 1.586, -1.500]]) # S atom above Mo
-# Call function with your data (iRn, bravais_vectors, WF, and index)
-plot_WF_3D_interactive(iRn, bravais, WF, diag, atomic_positions)
-# plot_WF_3D(iRn, bravais, WF, diag, atomic_positions)
+
