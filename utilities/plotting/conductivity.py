@@ -7,8 +7,8 @@ import sys
 # Configure plot
 # -----------------------------------------------------------
 
-filename = sys.argv[1]
-exciton_file = filename
+exciton_file = sys.argv[1]
+sp_file = sys.argv[2]
 # sp_file      = "hBN_sp.dat"
 fontsize     = 15
 markersize   = 110  # Adjust size of points in plot
@@ -39,11 +39,11 @@ for line in file.readlines():
     sigma_xx.append(line[1])
     sigma_yy.append(line[5])
     
-# file = open(sp_file, "r")
-# for line in file.readlines():
-#     line = [float(value) for value in line.split()]
-#     sigma_sp_xx.append(line[1])
-#     sigma_sp_yy.append(line[5])
+file = open(sp_file, "r")
+for line in file.readlines():
+    line = [float(value) for value in line.split()]
+    sigma_sp_xx.append(line[1])
+    sigma_sp_yy.append(line[5])
 
 # -----------------------------------------------------------
 # Plot states
@@ -51,8 +51,8 @@ for line in file.readlines():
 
 plt.plot(energy, sigma_xx, "g-", label="xx")
 plt.plot(energy, sigma_yy, "r-", label="yy")
-# plt.plot(energy, sigma_sp_xx, "b--", label="sp_xx")
-# plt.plot(energy, sigma_sp_yy, "c--", label="sp_yy")
+plt.plot(energy, sigma_sp_xx, "b--", label="sp_xx")
+plt.plot(energy, sigma_sp_yy, "c--", label="sp_yy")
 plt.xlabel("E (eV)")
 plt.ylabel(r"$\sigma$ ($e^2/\hbar$)")
 
