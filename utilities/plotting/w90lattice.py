@@ -286,7 +286,7 @@ import numpy as np
 import plotly.graph_objects as go
 import webbrowser
 
-def plot_WF_3D_interactive(iRn, bravais_vectors, WF, n_index, atomic_positions):
+def plot_WF_3D_interactive(iRn, bravais_vectors, WF, n_index, atomic_positions, colors):
     """
     Interactive 3D plot of Wannier function centers with atomic positions.
 
