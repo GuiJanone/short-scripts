@@ -18,33 +18,6 @@ import matplotlib.colors as mcolors
 import sys
 
 #===============================================================#
-# Edit this for the 3D interactive plot -- or make it all zero
-# Atomic positions (cartesian)
-atoms = {
-    "In": np.array([
-        [ 0.000000000, 0.000000000, 1.826367950],
-        [-2.080885887, 3.604200081, 1.826367950],
-        [ 4.161771774, 0.000000000, 1.826367950],
-        [ 2.080885887, 3.604200081, 1.826367950],
-        [-0.000000000, 2.402800126, 7.143893029]
-    ]),
-    "Se": np.array([
-        [ 2.080885949, 1.201400063, 0.000000000],
-        [ 0.000000000, 0.000000000, 5.022511864],
-        [-2.080885887, 3.604200081, 5.022511864],
-        [ 4.161771774, 0.000000000, 5.022511864],
-        [ 2.080885887, 3.604200081, 5.022511864],
-        [ 2.080885949, 1.201400063, 9.131839752]
-    ])
-}
-center_atom = atoms["Se"][0]  # Choosing first Se atom as center
-for element in atoms:
-    atoms[element] -= center_atom  # Shift all atoms
-
-# Define colors for the atoms
-colors = {"In": "purple", "Se": "green"}
-
-#===============================================================#
 # PARSER
 filename = sys.argv[1]
 # bond_length = sys.argv[2]
@@ -286,7 +259,7 @@ import numpy as np
 import plotly.graph_objects as go
 import webbrowser
 
-def plot_WF_3D_interactive(iRn, bravais_vectors, WF, n_index, atomic_positions, colors):
+def plot_WF_3D_interactive(iRn, bravais_vectors, WF, n_index):
     """
     Interactive 3D plot of Wannier function centers with atomic positions.
 
@@ -322,12 +295,12 @@ def plot_WF_3D_interactive(iRn, bravais_vectors, WF, n_index, atomic_positions, 
 
 
     # Plot atoms
-    for element, positions in atoms.items():
-        fig.add_trace(go.Scatter3d(
-            x=positions[:, 0], y=positions[:, 1], z=positions[:, 2],
-            mode='markers', marker=dict(size=6**2, color=colors[element], opacity=0.8),
-            name=element
-        ))
+#    for element, positions in atoms.items():
+#        fig.add_trace(go.Scatter3d(
+#            x=positions[:, 0], y=positions[:, 1], z=positions[:, 2],
+#            mode='markers', marker=dict(size=6**2, color=colors[element], opacity=0.8),
+#            name=element
+#        ))
     # Plot lattice vectors as lines (to preserve the cell perception)
     a1 = bravais_vectors[0,:]
     a2 = bravais_vectors[1,:]
@@ -368,7 +341,7 @@ if plot_option == 1:
     plot_WF_xy_zcolor(iRn, bravais, WF, diag)
 elif plot_option == 2:
     print("Plotting interactive 3D motif")
-    plot_WF_3D_interactive(iRn, bravais, WF, diag, atoms, colors)
+    plot_WF_3D_interactive(iRn, bravais, WF, diag)
 elif plot_option == 3:
     print("Plotting index-coded motif")
     plot_orbitals_indexCoded(iRn, bravais, WF, diag)
