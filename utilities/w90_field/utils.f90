@@ -9,8 +9,8 @@ module utils
     real(8)                        :: Rn(3, 3)
     integer, allocatable           :: iRn(:,:)
     complex(8), allocatable        :: H(:,:,:)
-    complex(8), allocatable        :: Rhop(:,:,:,:) ! motif
-    real(8)                        :: E_field  ! Electric field
+    complex(8), allocatable        :: Rhop(:,:,:,:) ! position amtrix elements
+    real(8)                        :: Eamp  ! Electric field amplitute
     integer                        :: center
 
 contains
@@ -18,12 +18,12 @@ contains
     subroutine LoadArguments()
         implicit none
         integer N, argCount
-        character(len=32) :: E_field_str
+        character(len=32) :: Eamp_str
 
         ! Get number of command-line arguments
         argCount = command_argument_count()
         if (argCount < 2) then
-            print*, "Usage: ./program <filename> <E_field>"
+            print*, "Usage: ./program <filename> <Eamp>"
             stop
         end if
 
@@ -33,11 +33,11 @@ contains
         call get_command_argument(1, FileName)
 
         ! Read electric field argument
-        call get_command_argument(2, E_field_str)
-        read(E_field_str, *) E_field
+        call get_command_argument(2, Eamp_str)
+        read(Eamp_str, *) Eamp
 
         print*, "Filename: ", FileName
-        print*, "Electric Field: ", E_field
+        print*, "Electric Field: ", Eamp
     end subroutine LoadArguments
 
     subroutine LoadSystem()
@@ -98,38 +98,21 @@ contains
         close(fp)
     end subroutine LoadSystem
 
-subroutine applyField(E_field)
+subroutine applyField(Eamp)
     implicit none
-    real(8), intent(in) :: E_field
-    integer :: i, ii, jj, k, kk
-    complex(8) :: deltaH, braket
-    complex(8) :: R(3), R0(3)
-    real(8), parameter :: r_z(3) = (/ 0.0d0, 0.0d0, 1.0d0 /)  ! (0,0,1) operator
+    real(8), intent(in) :: Eamp
+    real(8)             :: E_field(1,3)
+    integer             :: i, ii, jj, k, kk
+    complex(8)          :: deltaH, braket
+    complex(8)          :: R(3), R0(3)
+    real(8), parameter  :: r_z(3) = (/ 0.0d0, 0.0d0, 1.0d0 /)  ! (0,0,1) operator
 
+    E_field = Eamp
     do i = 1, nFock
         do ii = 1, mSize
             do jj = 1, mSize
-                ! Compute the full 3D vector for the current cell
-                do k = 1, 3
-                    R(k) = Rhop(k, i, ii, jj)
-                    do kk = 1, 3
-                        R(k) = R(k) + Rn(k, kk) * real(iRn(i, kk))
-                    end do
-                end do
-
-                ! Compute the full 3D vector for the reference cell (R = 0)
-                do kk = 1, 3
-                    R0(kk) = Rhop(kk, center, ii, jj)
-                end do
-
-                ! Compute the inner product <R0|r_z|R>
-                braket = cmplx(0.0d0, 0.0d0, kind=8)  ! Initialize to zero
-                do kk = 1, 3
-                    braket = braket + conjg(R0(kk)) * r_z(kk) * R(kk)
-                end do
-
                 ! Compute the perturbation: 
-                deltaH = E_field * braket
+                deltaH = Eamp * Rhop(3, i, ii, jj)
 
                 ! Update the Hamiltonian
                 H(i, ii, jj) = H(i, ii, jj) - deltaH
@@ -144,7 +127,7 @@ end subroutine applyField
         implicit none
         integer  :: i, ii, jj, j, fp
 
-        call applyField(E_field)
+        call applyField(Eamp)
 
         ! Open output file
         open(action = 'write', file="field_tb.dat", newunit=fp)

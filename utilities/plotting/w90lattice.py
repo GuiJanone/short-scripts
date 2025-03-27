@@ -266,7 +266,7 @@ def plot_WF_xy_zcolor(iRn, bravais_vectors, WF, n_index):
     # Create the scatter plot
     fig, ax = plt.subplots(figsize=(8, 8))
 
-    sc = ax.scatter(points[:, 0], points[:, 1], c=z_values, alpha=0.7, cmap='seismic', s=10**2)
+    sc = ax.scatter(points[:, 0], points[:, 1], c=z_values, alpha=0.6, cmap='seismic', s=10**2)
     cbar = plt.colorbar(sc, fraction=0.040, pad=0.04, ax=ax)
     cbar.set_label(f'Z coordinate ($\\AA$)', fontsize=16)
     ax.set_facecolor('gainsboro')
