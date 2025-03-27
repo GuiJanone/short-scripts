@@ -1,3 +1,8 @@
 # Some of usual not useful files
 __pycache__
 *.dat
+
+# f90 compiled binaries etc
+*.x
+*.o
+*.mod
