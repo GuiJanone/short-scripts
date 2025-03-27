@@ -107,12 +107,12 @@ subroutine applyField(Eamp)
     complex(8)          :: R(3), R0(3)
     real(8), parameter  :: r_z(3) = (/ 0.0d0, 0.0d0, 1.0d0 /)  ! (0,0,1) operator
 
-    E_field = Eamp
+    E_field = Eamp   ! dump, but useful for later generalizations 
     do i = 1, nFock
         do ii = 1, mSize
             do jj = 1, mSize
                 ! Compute the perturbation: 
-                deltaH = Eamp * Rhop(3, i, ii, jj)
+                deltaH = Eamp * Rhop(3, i, ii, jj) ! r_x,y,z enters here on future generalization
 
                 ! Update the Hamiltonian
                 H(i, ii, jj) = H(i, ii, jj) - deltaH
