@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 
 '''
-    This script contains some options for plotting the Wannier Centers
+    This script contains some options for plotting the position matrix elements (PME)
     using the seedname_tb.dat file of a wannierized system.
 
     Plot Options:
     1: plot x and y positions colored with z position
     2: plot xyz position in a 3D interactive plot using plotly -- needs atomic positions
     3: plots x and y positions colored by their index on the matrix 
+    4: plots the decay of PME along Rx, Ry, Rz - exception, plots everything and not only R = 0 cell
     
-    Every option plots the diagonal of the (0,0,0) cell!
+    Every option plots the diagonal of the (0,0,0) cell! 
 '''
 import numpy as np
 import matplotlib.pyplot as plt
@@ -302,15 +303,15 @@ def plot_WF_3D_interactive(iRn, bravais_vectors, WF, n_index):
 #            name=element
 #        ))
     # Plot lattice vectors as lines (to preserve the cell perception)
-    a1 = bravais_vectors[0,:]
-    a2 = bravais_vectors[1,:]
-    a3 = np.array([0.00000,0.00000, 9.0000000])
-    lattice_points = np.array([[0, 0, 0], a1, a2, a3, (a1 + a2), (a1 + a3), (a2 + a3), (a1 + a2 + a3)])
-    fig.add_trace(go.Scatter3d(
-        x=lattice_points[:, 0], y=lattice_points[:, 1], z=lattice_points[:, 2],
-        mode='markers', marker=dict(size=3, color="black", symbol='cross'),
-        name="Lattice"
-    ))
+    # a1 = bravais_vectors[0,:]
+    # a2 = bravais_vectors[1,:]
+    # a3 = np.array([0.00000,0.00000, 9.0000000])
+    # lattice_points = np.array([[0, 0, 0], a1, a2, a3, (a1 + a2), (a1 + a3), (a2 + a3), (a1 + a2 + a3)])
+    # fig.add_trace(go.Scatter3d(
+    #     x=lattice_points[:, 0], y=lattice_points[:, 1], z=lattice_points[:, 2],
+    #     mode='markers', marker=dict(size=3, color="black", symbol='cross'),
+    #     name="Lattice"
+    # ))
 
     # Customize layout
     fig.update_layout(
@@ -332,6 +333,100 @@ def plot_WF_3D_interactive(iRn, bravais_vectors, WF, n_index):
 
 #==============================================
 
+def get_decay(iRn, bravais_vectors, WF, diag, decimals=6):
+    # Map iRn to real-space positions: each row is [Rx, Ry, Rz]
+    real_space_positions = iRn @ bravais_vectors[:, :3]
+    n_blocks = WF.shape[0]
+    
+    # Create mask to exclude the central cell (diag)
+    valid_mask = np.ones(n_blocks, dtype=bool)
+    valid_mask[diag] = False                    # if True = plots R=0 cell
+    valid_indices = np.nonzero(valid_mask)[0]
+    
+    n_valid = valid_indices.size
+    pme_mean_x = np.empty(n_valid)
+    pme_mean_y = np.empty(n_valid)
+    pme_mean_z = np.empty(n_valid)
+    
+    pme_max_x = np.empty(n_valid)
+    pme_max_y = np.empty(n_valid)
+    pme_max_z = np.empty(n_valid)
+    
+    # Corresponding real space positions (for valid blocks)
+    rx = real_space_positions[valid_mask, 0]
+    ry = real_space_positions[valid_mask, 1]
+    rz = real_space_positions[valid_mask, 2]
+    
+    # Loop through valid blocks and extract the diagonal information.
+    for idx, n in enumerate(valid_indices):
+        diag_x = np.diagonal(WF[n, :, :, 0]).real
+        diag_y = np.diagonal(WF[n, :, :, 1]).real
+        diag_z = np.diagonal(WF[n, :, :, 2]).real
+
+        pme_mean_x[idx] = np.mean(diag_x)
+        pme_mean_y[idx] = np.mean(diag_y)
+        pme_mean_z[idx] = np.mean(diag_z)
+        
+        pme_max_x[idx] = np.max(diag_x)
+        pme_max_y[idx] = np.max(diag_y)
+        pme_max_z[idx] = np.max(diag_z)
+    
+    # Round the coordinates for grouping similar ones
+    rx_rounded = np.round(rx, decimals=decimals)
+    ry_rounded = np.round(ry, decimals=decimals)
+    rz_rounded = np.round(rz, decimals=decimals)
+    
+    # Group the mean values
+    unique_rx, indices_rx = np.unique(rx_rounded, return_inverse=True)
+    grouped_mean_x = np.array([pme_mean_x[indices_rx == i].mean() for i in range(len(unique_rx))])
+    
+    unique_ry, indices_ry = np.unique(ry_rounded, return_inverse=True)
+    grouped_mean_y = np.array([pme_mean_y[indices_ry == i].mean() for i in range(len(unique_ry))])
+    
+    unique_rz, indices_rz = np.unique(rz_rounded, return_inverse=True)
+    grouped_mean_z = np.array([pme_mean_z[indices_rz == i].mean() for i in range(len(unique_rz))])
+    
+    # Group the maximum values by averaging rather than taking the peak value in each group
+    grouped_max_x = np.array([pme_max_x[indices_rx == i].mean() for i in range(len(unique_rx))])
+    grouped_max_y = np.array([pme_max_y[indices_ry == i].mean() for i in range(len(unique_ry))])
+    grouped_max_z = np.array([pme_max_z[indices_rz == i].mean() for i in range(len(unique_rz))])
+    
+    # Plotting the data: scatter for means and a line for the representative maximums.
+    fig, ax = plt.subplots(2, 1, figsize=(8, 10))
+    
+    # X-axis component
+    # ax[0].scatter(unique_rx, grouped_mean_x, color='tab:red', s=20, alpha=0.7, label='Mean Dipole (x)')
+    ax[0].plot(unique_rx, grouped_mean_x, color='tab:red', lw=2.5, alpha=0.7, marker='o')
+    # ax[0].plot(unique_rx, grouped_max_x, color='tab:red', lw=2.5, alpha=0.7, label='Avg Max Dipole (x)')
+    ax[0].set_xlabel('$R_x$ ($\\AA$)', fontsize=14)
+    ax[0].set_ylabel('Dipole Moment (x)', fontsize=12)
+    # ax[0].legend(loc='best')
+    
+    # Y-axis component
+    # ax[1].scatter(unique_ry, grouped_mean_y, color='tab:green', s=20, alpha=0.7, label='Mean Dipole (y)')
+    ax[1].plot(unique_ry, grouped_mean_y, color='tab:green', lw=2.5, alpha=0.7, marker='o')
+    # ax[1].plot(unique_ry, grouped_max_y, color='tab:green', lw=2.5, alpha=0.7, label='Avg Max Dipole (y)')
+    ax[1].set_xlabel('$R_y$ ($\\AA$)', fontsize=14)
+    ax[1].set_ylabel('Dipole Moment (y)', fontsize=12)
+    # ax[1].legend(loc='best')
+    
+    # # Z-axis component
+    # # ax[2].scatter(unique_rz, grouped_mean_z, color='tab:blue', s=20, alpha=0.7, label='Mean Dipole (z)')
+    # ax[2].plot(unique_rz, grouped_mean_z, color='tab:blue', lw=2.5, alpha=0.7, marker='o')
+    # # ax[2].plot(unique_rz, grouped_max_z, color='tab:blue', lw=2.5, alpha=0.7, label='Avg Max Dipole (z)')
+    # ax[2].set_xlabel('$R_z$ ($\\AA$)', fontsize=14)
+    # ax[2].set_ylabel('Dipole Moment (z)', fontsize=14)
+    # # ax[2].legend(loc='best')
+    
+    plt.tight_layout()
+    plt.savefig("dipole_decay_NOcenter.png", dpi=400)
+    plt.show()
+
+
+#==============================================
+#==============================================
+#==============================================
+
 # parser
 bravais, nFock, mSize, iRn, H, WF, diag  = parse_file(filename)
 
@@ -345,6 +440,8 @@ elif plot_option == 2:
 elif plot_option == 3:
     print("Plotting index-coded motif")
     plot_orbitals_indexCoded(iRn, bravais, WF, diag)
+elif plot_option == 4:
+    get_decay(iRn, bravais, WF, diag)
 
 # plot_orbitals_Ncoded(iRn, bravais, WF)
 # plot_WF_xz(iRn, bravais, WF, diag)
