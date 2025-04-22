@@ -83,7 +83,7 @@ for wf in wfs:
 # Plot states
 # -----------------------------------------------------------
 
-fig, ax = plt.subplots(3, 2, figsize=(8, 10), sharex=True, sharey=True)
+fig, ax = plt.subplots(4, 2, figsize=(8, 10), sharex=True, sharey=True)
 
 # Use smoother interpolation instead of tripcolor
 ax[0, 0].contourf(k_x_grid, k_y_grid, interpolated_wfs[0], levels=100, cmap="viridis")
@@ -91,6 +91,9 @@ ax[0, 1].contourf(k_x_grid, k_y_grid, interpolated_wfs[1], levels=100, cmap="vir
 ax[1, 0].contourf(k_x_grid, k_y_grid, interpolated_wfs[2], levels=100, cmap="viridis")
 ax[1, 1].contourf(k_x_grid, k_y_grid, interpolated_wfs[3], levels=100, cmap="viridis")
 ax[2, 0].contourf(k_x_grid, k_y_grid, interpolated_wfs[4], levels=100, cmap="viridis")
+ax[2, 1].contourf(k_x_grid, k_y_grid, interpolated_wfs[5], levels=100, cmap="viridis")
+ax[3, 0].contourf(k_x_grid, k_y_grid, interpolated_wfs[6], levels=100, cmap="viridis")
+ax[3, 1].contourf(k_x_grid, k_y_grid, interpolated_wfs[7], levels=100, cmap="viridis")
 
 for axis_row in ax:
     for axis in axis_row:
@@ -111,10 +114,11 @@ ax[2, 0].set_ylabel(r"$k_y$ (\AA$^{-1}$)")
 
 ax[1, 1].set_xlabel(r"$k_x$ (\AA$^{-1}$)")
 ax[1, 1].set_xticks([-xlim, 0, xlim])
-ax[2, 0].set_xlabel(r"$k_x$ (\AA$^{-1}$)")
-ax[2, 0].set_xticks([-xlim, 0, xlim])
+ax[3, 0].set_xlabel(r"$k_x$ (\AA$^{-1}$)")
+ax[3, 0].set_xticks([-xlim, 0, xlim])
 
 ax[2, 1].axis("off")
+# ax[2, 1].axis("off")
 
 fig.tight_layout()
 plt.savefig("kwf_interpolated.png", dpi=300)
