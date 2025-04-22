@@ -333,95 +333,119 @@ def plot_WF_3D_interactive(iRn, bravais_vectors, WF, n_index):
 
 #==============================================
 
-def get_decay(iRn, bravais_vectors, WF, diag, decimals=6):
-    # Map iRn to real-space positions: each row is [Rx, Ry, Rz]
-    real_space_positions = iRn @ bravais_vectors[:, :3]
-    n_blocks = WF.shape[0]
+def get_decay(iRn, bravais_vectors, WF, H, diag, decimals=3):
+    """
+    Compute and plot the decay of the diagonal PME components (x, y, z) and hopping amplitude 
+    as functions of the distance |R| from the central cell (excluded, based on diag).
     
-    # Create mask to exclude the central cell (diag)
-    valid_mask = np.ones(n_blocks, dtype=bool)
-    valid_mask[diag] = False                    # if True = plots R=0 cell
+    For each valid Fock (n) block (excluding diag), we compute one value per block by taking the 
+    mean of the absolute real parts of the diagonal elements of WF (for each component) and the 
+    maximum of the diagonal of H (representing the hopping amplitude). Then, using the real-space 
+    translation vector R (obtained via iRn and bravais_vectors) and its norm, we group data with 
+    similar |R| values by rounding.
+    
+    Parameters:
+        WF             : Complex array of PME data with shape (nFock, mSize, mSize, 3) — only the 
+                         diagonal elements (i == j) are meaningful.
+        iRn            : Integer array of lattice translation indices with shape (nFock, 3).
+        bravais_vectors: 3x3 array of Bravais lattice vectors.
+        H              : Complex Hamiltonian array with shape (nFock, mSize, mSize).
+        diag           : Integer index identifying the central (R = 0) cell to exclude.
+        decimals       : Number of decimals to round the distance |R| for grouping (default: 6).
+    
+    Returns:
+        unique_R         : 1D array of unique |R| values (sorted).
+        grouped_pme_x    : 1D array of binned average |PME_x| per unique R.
+        grouped_pme_y    : 1D array of binned average |PME_y| per unique R.
+        grouped_pme_z    : 1D array of binned average |PME_z| per unique R.
+        grouped_hopps    : 1D array of binned average hopping amplitude per unique R.
+    """
+    import numpy as np
+    import matplotlib.pyplot as plt
+
+    # Number of Fock blocks and the matrix size for WF.
+    nFock, mSize = WF.shape[0], WF.shape[1]
+    # Compute real-space positions from lattice translations; shape (nFock, 3)
+    real_space_positions = np.dot(iRn, bravais_vectors)
+    
+    # Create a boolean mask to exclude the central (R=0) block:
+    valid_mask = np.ones(nFock, dtype=bool)
+    valid_mask[diag] = True
     valid_indices = np.nonzero(valid_mask)[0]
-    
     n_valid = valid_indices.size
+
+    # Preallocate arrays to store the decay properties for each valid block.
     pme_mean_x = np.empty(n_valid)
     pme_mean_y = np.empty(n_valid)
     pme_mean_z = np.empty(n_valid)
+    hopps_max    = np.empty(n_valid)
     
-    pme_max_x = np.empty(n_valid)
-    pme_max_y = np.empty(n_valid)
-    pme_max_z = np.empty(n_valid)
+    # We'll also compute |R| for each block (using the real-space vector)
+    R_norm = np.empty(n_valid)
     
-    # Corresponding real space positions (for valid blocks)
-    rx = real_space_positions[valid_mask, 0]
-    ry = real_space_positions[valid_mask, 1]
-    rz = real_space_positions[valid_mask, 2]
-    
-    # Loop through valid blocks and extract the diagonal information.
+    # Loop over valid Fock blocks
     for idx, n in enumerate(valid_indices):
-        diag_x = np.diagonal(WF[n, :, :, 0]).real
-        diag_y = np.diagonal(WF[n, :, :, 1]).real
-        diag_z = np.diagonal(WF[n, :, :, 2]).real
-
-        pme_mean_x[idx] = np.mean(diag_x)
-        pme_mean_y[idx] = np.mean(diag_y)
-        pme_mean_z[idx] = np.mean(diag_z)
+        R_vec = real_space_positions[n]    # [Rx, Ry, Rz] for this block
+        R_norm[idx] = np.linalg.norm(R_vec)  # |R|
         
-        pme_max_x[idx] = np.max(diag_x)
-        pme_max_y[idx] = np.max(diag_y)
-        pme_max_z[idx] = np.max(diag_z)
+        # Extract diagonal elements from WF for this block: WF[n, i, i, :], for i in 0...mSize-1.
+        diag_elements = np.array([WF[n, i, i, :] for i in range(mSize)])
+        # Compute the average (mean) of the absolute real parts for each spatial component.
+        pme_mean_x[idx] = np.mean(np.abs(diag_elements[:, 0].real))
+        pme_mean_y[idx] = np.mean(np.abs(diag_elements[:, 1].real))
+        pme_mean_z[idx] = np.mean(np.abs(diag_elements[:, 2].real))
+        
+        # Get the diagonal of the hopping matrix for this block and take its maximum as the representative value.
+        diag_H = np.diagonal(H[n, :, :]).real
+        hopps_max[idx] = np.mean(np.abs(diag_H))
     
-    # Round the coordinates for grouping similar ones
-    rx_rounded = np.round(rx, decimals=decimals)
-    ry_rounded = np.round(ry, decimals=decimals)
-    rz_rounded = np.round(rz, decimals=decimals)
+    # Group data based on unique |R| values (after rounding)
+    R_rounded = np.round(R_norm, decimals=decimals)
+    unique_R, group_indices = np.unique(R_rounded, return_inverse=True)
     
-    # Group the mean values
-    unique_rx, indices_rx = np.unique(rx_rounded, return_inverse=True)
-    grouped_mean_x = np.array([pme_mean_x[indices_rx == i].mean() for i in range(len(unique_rx))])
+    # For each unique |R|, average the PME components and hopping amplitudes.
+    grouped_pme_x = np.array([pme_mean_x[group_indices == i].mean() for i in range(len(unique_R))])
+    grouped_pme_y = np.array([pme_mean_y[group_indices == i].mean() for i in range(len(unique_R))])
+    grouped_pme_z = np.array([pme_mean_z[group_indices == i].mean() for i in range(len(unique_R))])
+    grouped_hopps = np.array([hopps_max[group_indices == i].mean() for i in range(len(unique_R))])
     
-    unique_ry, indices_ry = np.unique(ry_rounded, return_inverse=True)
-    grouped_mean_y = np.array([pme_mean_y[indices_ry == i].mean() for i in range(len(unique_ry))])
+    # Plotting the decay curves
+    fig, axs = plt.subplots(2, 2, figsize=(12, 10))
     
-    unique_rz, indices_rz = np.unique(rz_rounded, return_inverse=True)
-    grouped_mean_z = np.array([pme_mean_z[indices_rz == i].mean() for i in range(len(unique_rz))])
+    # Plot for PME_x decay vs. |R|
+    axs[0, 0].scatter(unique_R, grouped_pme_x, color='r', s=50, alpha=0.7, label='PME$_x$')
+    axs[0, 0].set_xlabel(f'$|R|$ ($\\AA$)', fontsize=14)
+    axs[0, 0].set_ylabel(f'Mean |PME$_x$|', fontsize=14)
+    axs[0, 0].legend()
     
-    # Group the maximum values by averaging rather than taking the peak value in each group
-    grouped_max_x = np.array([pme_max_x[indices_rx == i].mean() for i in range(len(unique_rx))])
-    grouped_max_y = np.array([pme_max_y[indices_ry == i].mean() for i in range(len(unique_ry))])
-    grouped_max_z = np.array([pme_max_z[indices_rz == i].mean() for i in range(len(unique_rz))])
+    # Plot for PME_y decay vs. |R|
+    axs[0, 1].scatter(unique_R, grouped_pme_y, color='g', s=50, alpha=0.7, label='PME$_y$')
+    axs[0, 1].set_xlabel(f'$|R|$ ($\\AA$)', fontsize=14)
+    axs[0, 1].set_ylabel(f'Mean |PME$_y$|', fontsize=14)
+    axs[0, 1].legend()
     
-    # Plotting the data: scatter for means and a line for the representative maximums.
-    fig, ax = plt.subplots(2, 1, figsize=(8, 10))
+    # Plot for PME_z decay vs. |R|
+    axs[1, 0].scatter(unique_R, grouped_pme_z, color='b', s=50, alpha=0.7, label='PME$_z$')
+    axs[1, 0].set_xlabel(f'$|R|$ ($\\AA$)', fontsize=14)
+    axs[1, 0].set_ylabel(f'Mean |PME$_z$|', fontsize=14)
+    axs[1, 0].legend()
     
-    # X-axis component
-    # ax[0].scatter(unique_rx, grouped_mean_x, color='tab:red', s=20, alpha=0.7, label='Mean Dipole (x)')
-    ax[0].plot(unique_rx, grouped_mean_x, color='tab:red', lw=2.5, alpha=0.7, marker='o')
-    # ax[0].plot(unique_rx, grouped_max_x, color='tab:red', lw=2.5, alpha=0.7, label='Avg Max Dipole (x)')
-    ax[0].set_xlabel('$R_x$ ($\\AA$)', fontsize=14)
-    ax[0].set_ylabel('Dipole Moment (x)', fontsize=12)
-    # ax[0].legend(loc='best')
+    # Plot for hopping amplitude vs. |R|
+    axs[1, 1].scatter(unique_R, grouped_hopps, color='k', s=50, alpha=0.7, label='Hopping Amplitude')
+    axs[1, 1].set_xlabel(f'$|R|$ ($\\AA$)', fontsize=14)
+    axs[1, 1].set_ylabel('Hopping Amplitude', fontsize=14)
+    axs[1, 1].legend(fontsize=12)
     
-    # Y-axis component
-    # ax[1].scatter(unique_ry, grouped_mean_y, color='tab:green', s=20, alpha=0.7, label='Mean Dipole (y)')
-    ax[1].plot(unique_ry, grouped_mean_y, color='tab:green', lw=2.5, alpha=0.7, marker='o')
-    # ax[1].plot(unique_ry, grouped_max_y, color='tab:green', lw=2.5, alpha=0.7, label='Avg Max Dipole (y)')
-    ax[1].set_xlabel('$R_y$ ($\\AA$)', fontsize=14)
-    ax[1].set_ylabel('Dipole Moment (y)', fontsize=12)
-    # ax[1].legend(loc='best')
-    
-    # # Z-axis component
-    # # ax[2].scatter(unique_rz, grouped_mean_z, color='tab:blue', s=20, alpha=0.7, label='Mean Dipole (z)')
-    # ax[2].plot(unique_rz, grouped_mean_z, color='tab:blue', lw=2.5, alpha=0.7, marker='o')
-    # # ax[2].plot(unique_rz, grouped_max_z, color='tab:blue', lw=2.5, alpha=0.7, label='Avg Max Dipole (z)')
-    # ax[2].set_xlabel('$R_z$ ($\\AA$)', fontsize=14)
-    # ax[2].set_ylabel('Dipole Moment (z)', fontsize=14)
-    # # ax[2].legend(loc='best')
-    
-    plt.tight_layout()
-    plt.savefig("dipole_decay_NOcenter.png", dpi=400)
-    plt.show()
+    for ax in axs.flat:
+        ax.grid(True, which='both', ls='--', alpha=0.5)
+        ax.set_yscale('log')
+        # ax.set_ylim(1e-8, 15)
 
+    # fig.suptitle('MLWF', fontsize=16)
+    plt.tight_layout()
+    plt.savefig("dipole_decay.png", dpi=400)
+    plt.show()
+    
 
 #==============================================
 #==============================================
@@ -441,7 +465,7 @@ elif plot_option == 3:
     print("Plotting index-coded motif")
     plot_orbitals_indexCoded(iRn, bravais, WF, diag)
 elif plot_option == 4:
-    get_decay(iRn, bravais, WF, diag)
+    get_decay(iRn, bravais, WF, H, diag)
 
 # plot_orbitals_Ncoded(iRn, bravais, WF)
 # plot_WF_xz(iRn, bravais, WF, diag)
