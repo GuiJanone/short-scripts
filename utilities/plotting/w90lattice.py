@@ -469,5 +469,3 @@ elif plot_option == 4:
 
 # plot_orbitals_Ncoded(iRn, bravais, WF)
 # plot_WF_xz(iRn, bravais, WF, diag)
-
-
