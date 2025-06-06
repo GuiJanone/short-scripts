@@ -1,4 +1,4 @@
-program wannier2xatu
+program field
     use utils
     implicit none
 
@@ -6,4 +6,4 @@ program wannier2xatu
     call LoadSystem()
     call writeOutput()
     
-end program wannier2xatu
+end program field

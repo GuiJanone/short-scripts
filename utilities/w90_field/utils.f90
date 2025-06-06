@@ -133,7 +133,7 @@ end subroutine applyField
         open(action = 'write', file="field_tb.dat", newunit=fp)
 
         ! Write initial information
-        write(fp, *) 
+        write(fp, *) "Field applied = ", Eamp
         write(fp, *) Rn(1, :)
         write(fp, *) Rn(2, :)
         write(fp, *) Rn(3, :)

@@ -1,4 +1,4 @@
-wannier2xatu.x: wannier2xatu.f90 utils.o
+applyfield.x: field.f90 utils.o
 	gfortran -o $@ $^  
 
 utils.o: utils.f90
