@@ -99,4 +99,5 @@ ax[1, 1].set_xticks([-xlim, 0, xlim])
 ax[1,1].tick_params(labelbottom=True)
 
 plt.tight_layout()
-plt.savefig("kwf.png", dpi=300)
+plt.savefig("kwf.png", dpi=600)
+# plt.show()

@@ -234,7 +234,7 @@ def plot_WF_xy_zcolor(iRn, bravais_vectors, WF, n_index):
     orbital_positions = np.real(orbital_positions)
 
     # Compute positions
-    points = real_space_positions[n_index, :2] + orbital_positions[:, :2]
+    points =  orbital_positions[:, :2]
     z_values = orbital_positions[:, 2]
     
     # Create the scatter plot
@@ -446,6 +446,31 @@ def get_decay(iRn, bravais_vectors, WF, H, diag, decimals=3):
     plt.savefig("dipole_decay.png", dpi=400)
     plt.show()
     
+#==============================================
+
+def write_motif(iRn, bravais, WF, H, diag):
+    # Map iRn to real-space positions
+    real_space_positions = map_to_real_space(iRn, bravais)
+
+    # Extract only the diagonal elements from WF for the chosen block
+    orbital_positions = np.array([WF[diag, i, i, :] for i in range(min(WF.shape[1], WF.shape[2]))])
+    orbital_positions = np.real(orbital_positions)
+
+    # Combine real-space positions with orbital positions
+    points = real_space_positions[diag, :] + orbital_positions[:, :]
+
+    # Extract X, Y, Z coordinates
+    x, y, z = points[:, 0], points[:, 1], points[:, 2]
+
+    with open("wannier_centers.xyz", "w") as f:
+        f.write(f"{len(orbital_positions)}\n")
+        f.write(f" Wannier centres from diagonal of the 000 cell from _tb.dat")
+        for pos in orbital_positions:
+            f.write(f"X  {pos[0]:16.8f}  {pos[1]:16.8f}  {pos[2]:16.8f}\n")
+        f.close()
+
+
+    return print("Done.")
 
 #==============================================
 #==============================================
@@ -466,6 +491,8 @@ elif plot_option == 3:
     plot_orbitals_indexCoded(iRn, bravais, WF, diag)
 elif plot_option == 4:
     get_decay(iRn, bravais, WF, H, diag)
+elif plot_option == 5:
+    write_motif(iRn, bravais, WF, H, diag)
 
 # plot_orbitals_Ncoded(iRn, bravais, WF)
 # plot_WF_xz(iRn, bravais, WF, diag)

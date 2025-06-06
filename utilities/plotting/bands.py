@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import sys
 
-def plot_bands(filename):
+def plot_bands(filename, Efermi):
     # Load data
     k_points, energies = np.loadtxt(filename, unpack=True)
 
@@ -21,7 +21,7 @@ def plot_bands(filename):
     # Plot each segment separately
     for i, (start, end) in enumerate(zip(start_indices, end_indices)):
         label = "Electronic Bands" if i == 0 else None
-        plt.plot(k_points[start:end], energies[start:end], 
+        plt.plot(k_points[start:end], energies[start:end]-Efermi, 
                  color='black', linewidth=1.5, label=label)
     
     # Add labels and title
@@ -35,12 +35,14 @@ def plot_bands(filename):
     
     # Show the plot
     plt.tight_layout()
-    plt.savefig("bands.png", dpi=300)
+    plt.savefig("bands.png", dpi=400)
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Usage: python3 script.py <filename>")
+    if len(sys.argv) != 3:
+        print("Usage: python3 script.py <filename> <fermi energy>")
         sys.exit(1)
     
     filename = sys.argv[1]
-    plot_bands(filename)
+    Efermi = float(sys.argv[2])
+    print(Efermi)
+    plot_bands(filename, Efermi)

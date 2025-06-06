@@ -53,7 +53,7 @@ file.close()
 # Sum densities over degeneracies
 # -----------------------------------------------------------
 
-degeneracies = [1, 1, 1, 1, 1, 1, 1]
+degeneracies = [1, 1, 1, 1, 1, 1, 1, 1]
 wfs = []
 counter = 0
 for deg in degeneracies:
