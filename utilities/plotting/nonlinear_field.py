@@ -3,7 +3,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 from matplotlib.ticker import AutoMinorLocator, MultipleLocator
-from matplotlib.cm import get_cmap
+import matplotlib.cm as cm
+import matplotlib.colors as colors
 import colorcet as cc
 import sys
 
@@ -30,27 +31,32 @@ plt.rcParams["font.size"] = fontsize
 # -----------------------------------------------------------
 def compare_all(filename):
     sp_file = filename
-    y_column = 1  # Index of the column you want to plot (0 = energy, 1 = xxx, 2 = xyy, etc.)
-    # color_list = plt.cm.inferno(np.linspace(0, 1, 10))
+    y_column = 1  # Index of the column to plot
 
-    # 1) Pick up folder names that parse as floats (including negatives)
+    # 1) Collect folders that are field values
     folders = []
     for f in os.listdir():
         if os.path.isdir(f):
             try:
-                _ = float(f)
+                float(f)
                 folders.append(f)
             except ValueError:
                 continue
     folders = sorted(folders, key=lambda x: float(x))
+    # Apply mask: keep only certain field ranges or values
+    min_field = -0.010
+    max_field =  0.010
+    folders = [f for f in folders if min_field <= float(f) <= max_field]
 
-    field_intensities = []
-    all_energy = []
-    all_sigma = []
-    colors = []
 
-    color_list = plt.cm.plasma_r(np.linspace(0, 1, len(folders)+1))
-    idx = 1
+    # 2) Prepare figure and colormap
+    fig, ax = plt.subplots(figsize=(8, 5))
+    field_vals = np.array([float(f) for f in folders])
+    norm = colors.Normalize(vmin=field_vals.min(), vmax=field_vals.max())
+    cmap = cm.get_cmap("cet_bkr")
+    sm = cm.ScalarMappable(cmap=cmap, norm=norm)
+
+    # 3) Plot each curve with its corresponding color
     for folder in folders:
         filepath = os.path.join(folder, sp_file)
         if not os.path.exists(filepath):
@@ -59,44 +65,29 @@ def compare_all(filename):
 
         data = np.loadtxt(filepath)
         energy = data[:, 0]
-        sigma  = data[:, y_column]
-
+        sigma = data[:, y_column]
         E_field = float(folder)
-        field_intensities.append(E_field)
-        all_energy.extend(energy)
-        all_sigma.extend(sigma)
-        colors = color_list[idx]
-        idx = idx + 1
 
-    all_sigma = np.array(all_sigma)
-    all_energy = np.array(all_energy)
-    field_intensities = np.array(field_intensities)
+        mask = energy <= 2.5
+        energy = energy[mask]
+        sigma = sigma[mask]
 
-    # -----------------------------------------------------------
-    # Plot
-    # -----------------------------------------------------------
+        ax.plot(energy, sigma, color=sm.to_rgba(E_field), alpha=0.7)
 
-    fig, ax = plt.subplots(figsize=(8, 5))
-
-    ax.plot(all_energy, all_sigma, label=f"{folder}", 
-        c=colors,
-        alpha=0.7)
-
-
-    ax.set_xlabel(r"$E_{photon}$ (eV)", fontsize=18)
-    ax.set_ylabel(r"$\sigma^{(2)}_{xxx}\ (\mu$A/V$^2 \cdot nm)$", fontsize=18)
-    # ax.set_xlim(1.5, 4.0)
-    # ax.set_ylim(-25, 25)
-    # ax.set_xticks(np.arange(1.5, 4.1, 0.5))
+    # 4) Configure axes and colorbar
+    ax.set_xlabel(r"$E_{\mathrm{photon}}$ (eV)", fontsize=18)
+    ax.set_ylabel(r"$\sigma^{(2)}_{xxx}$ ($\mu$A/V$^2 \cdot$nm)", fontsize=18)
     ax.xaxis.set_minor_locator(AutoMinorLocator(5))
-    ax.tick_params(axis='x', which='minor', length=7)
-    # ax.set_xticks(np.arange(1.5, 3.1, 0.25))
+    ax.tick_params(axis='x', which='minor', length=5)
 
-    ax.legend(title=r"Field (eV/\AA)", loc='upper right', fontsize=12)
+    ax.set_xlim(1.5, 2.5)
+
+    cbar = plt.colorbar(sm, ax=ax)
+    cbar.set_label(r"Field Intensity (eV/\AA)", fontsize=14)
+
     plt.tight_layout()
-    plt.savefig("field_dependence.png", dpi=400)
+    plt.savefig("field_dependence_masked.png", dpi=400)
     plt.show()
-    return
 
 #===============================================================================#
 # zero vs field 

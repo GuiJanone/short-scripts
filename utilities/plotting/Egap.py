@@ -2,10 +2,12 @@
 import os
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy.stats import linregress
 import sys
 
 
 sp_file = "field_band.dat"
+outfile = "bandgap_vs_field.dat"
 
 if len(sys.argv) > 0:
     filling = int(sys.argv[1])
@@ -45,20 +47,49 @@ for f in folders:
     except Exception as e:
         print(f"Error reading {path}: {e}")
 
+
+print(f"Writing outfile '{outfile}'...")
+with open(outfile, "w") as f:
+    f.write('fieldIntensity     Egap\n')
+    for i in range(len(Egap)):
+        f.write(f' {field[i]:.5f}    {Egap[i]:.5f}\n')
+
+print("DONE.")
+print("Plotting...")
 # Sort data by field value
-field = np.array(field)
-Egap = np.array(Egap)
+field      = np.array(field)
+Egap       = np.array(Egap)
+
 sorted_idx = np.argsort(field)
-field = field[sorted_idx]
-Egap = Egap[sorted_idx]
-print(f"Original Gap: {np.max(Egap)}")
+field      = field[sorted_idx]
+Egap       = Egap[sorted_idx]
+size = len(field)
+
+deriv = np.gradient(Egap)
+
+slope, intercept, = linregress(field[int(size/2)+1:], Egap[int(size/2)+1:])[:2]
+fit = slope*field[int(size/2)+1:] + intercept
+
+print(f"Original Gap = {np.max(Egap)} eV")
+print("---------LINEAR FIT---------")
+print(f"Intercept = {intercept:.4f}")
+print(f"Slope = {slope:.4f}")
 
 # Plot
-fig, ax = plt.subplots()
-ax.plot(field*1000, Egap, marker="o", c='k')
-ax.set_xlabel(r"Field intensity (meV/$\AA$)")
-ax.set_ylabel(r"Gap Energy (eV)")
-plt.grid(True)
+fig, ax = plt.subplots(2,1, height_ratios=[2, 1], sharex=True)
+ax[0].plot(field*1000, Egap, marker="o", c='k')
+ax[0].plot(field[int(size/2)+1:]*1000, fit, c='red')
+
+ax[1].plot(field*1000, deriv, c='red')
+ax[1].set_xlabel(r"Field intensity (meV/$\AA$)")
+
+ax[0].set_ylabel(r"Gap Energy (eV)")
+ax[1].set_ylabel(r"$d E_{\text{gap}}/d E_{DC}$")
+
+
+
+ax[0].grid(True)
+ax[1].grid(True)
 
 plt.tight_layout()
 plt.savefig("bandgap_vs_field.png", dpi=600)

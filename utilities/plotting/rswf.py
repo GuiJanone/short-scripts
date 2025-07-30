@@ -70,10 +70,12 @@ for degeneracy in degeneracies:
 # Plot states
 # -----------------------------------------------------------
 
+
+
 fig, ax = plt.subplots(4, 2, figsize=(6, 8), sharex=True, sharey=True)
 
 state = wfs[0] / np.max(wfs[0])
-ax[0, 0].scatter(xArray - holePosition[0], yArray - holePosition[1], c=state, cmap="Greens", s=markersize - markersize*(state - 1)**10)
+cbar = ax[0, 0].scatter(xArray - holePosition[0], yArray - holePosition[1], c=state, cmap="Greens", s=markersize - markersize*(state - 1)**10)
 ax[0, 0].scatter(0, 0, c="r", label="Hole", s=markersize)
 ax[0, 0].legend(loc="upper left")
 
@@ -128,4 +130,4 @@ ax[1, 1].set_xticks([-xlim, 0, xlim])
 
 ax[1,1].tick_params(labelbottom=True)
 plt.tight_layout()
-plt.savefig("rswf.png", dpi=300)
+plt.savefig("rswf.png", dpi=600)

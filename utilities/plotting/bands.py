@@ -28,6 +28,8 @@ def plot_bands(filename, Efermi):
     plt.xlabel("k-space", fontsize=12)
     plt.ylabel("Energy (eV)", fontsize=12)
     plt.title("Electronic Band Structure", fontsize=14)
+    plt.xlim(0, k_points[end-1])
+    # plt.ylim(-10, 3)
     
     # Add grid and legend
     plt.grid(True, linestyle='--', alpha=0.6)
@@ -35,7 +37,8 @@ def plot_bands(filename, Efermi):
     
     # Show the plot
     plt.tight_layout()
-    plt.savefig("bands.png", dpi=400)
+    plt.savefig("bands.png", dpi=600)
+    # plt.show()
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
@@ -44,5 +47,4 @@ if __name__ == "__main__":
     
     filename = sys.argv[1]
     Efermi = float(sys.argv[2])
-    print(Efermi)
     plot_bands(filename, Efermi)

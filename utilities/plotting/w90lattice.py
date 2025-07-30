@@ -234,8 +234,8 @@ def plot_WF_xy_zcolor(iRn, bravais_vectors, WF, n_index):
     orbital_positions = np.real(orbital_positions)
 
     # Compute positions
-    points =  orbital_positions[:, :2]
-    z_values = orbital_positions[:, 2]
+    points =  real_space_positions[n_index, :2] + orbital_positions[:, :2]
+    z_values = real_space_positions[n_index, 2] + orbital_positions[:, 2]
     
     # Create the scatter plot
     fig, ax = plt.subplots(figsize=(8, 8))
@@ -449,6 +449,7 @@ def get_decay(iRn, bravais_vectors, WF, H, diag, decimals=3):
 #==============================================
 
 def write_motif(iRn, bravais, WF, H, diag):
+    print("Fetching Wannier Centers...")
     # Map iRn to real-space positions
     real_space_positions = map_to_real_space(iRn, bravais)
 
@@ -464,13 +465,13 @@ def write_motif(iRn, bravais, WF, H, diag):
 
     with open("wannier_centers.xyz", "w") as f:
         f.write(f"{len(orbital_positions)}\n")
-        f.write(f" Wannier centres from diagonal of the 000 cell from _tb.dat")
+        f.write(f" Wannier centres from diagonal of the 000 cell from _tb.dat\n")
         for pos in orbital_positions:
             f.write(f"X  {pos[0]:16.8f}  {pos[1]:16.8f}  {pos[2]:16.8f}\n")
         f.close()
 
 
-    return print("Done.")
+    return print("Done. Positions written in 'wannier_centers.xyz'")
 
 #==============================================
 #==============================================
