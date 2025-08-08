@@ -78,7 +78,7 @@ print(f"Slope = {slope:.4f}")
 # Plot
 fig, ax = plt.subplots(2,1, height_ratios=[2, 1], sharex=True)
 ax[0].plot(field*1000, Egap, marker="o", c='k')
-ax[0].plot(field[int(size/2)+1:]*1000, fit, c='red')
+# ax[0].plot(field[int(size/2)+1:]*1000, fit, c='red')
 
 ax[1].plot(field*1000, deriv, c='red')
 ax[1].set_xlabel(r"Field intensity (meV/$\AA$)")
@@ -86,7 +86,10 @@ ax[1].set_xlabel(r"Field intensity (meV/$\AA$)")
 ax[0].set_ylabel(r"Gap Energy (eV)")
 ax[1].set_ylabel(r"$d E_{\text{gap}}/d E_{DC}$")
 
-
+# ax[0].set_xlim(-15, 15)
+# ax[1].set_xlim(-15, 15)
+# ax[0].set_ylim(1.5, 1.75)
+# ax[1].set_ylim(-0.01, 0.01)
 
 ax[0].grid(True)
 ax[1].grid(True)
