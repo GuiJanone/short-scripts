@@ -108,10 +108,10 @@ def plot_type1(energy, sigma_xx, sigma_yy, sigma_zz,
     fig, ax = plt.subplots(figsize=(6.4, 4.8))
     ax.plot(energy, sigma_xx,    "r-",  label="BSE_xx", alpha=0.6)
     ax.plot(energy, sigma_yy,    "orange", label="BSE_yy", alpha=0.6)
-    ax.plot(energy, sigma_zz,    "g-",  label="BSE_zz", alpha=0.6)
+    # ax.plot(energy, sigma_zz,    "g-",  label="BSE_zz", alpha=0.6)
     ax.plot(energy, sigma_sp_xx, "b--", label="IPA_xx")
     ax.plot(energy, sigma_sp_yy, "c--", label="IPA_yy")
-    ax.plot(energy, sigma_sp_zz, ls="--", c="navy", label="IPA_zz")
+    # ax.plot(energy, sigma_sp_zz, ls="--", c="navy", label="IPA_zz")
 
     ax.set_xlabel("E (eV)", fontsize=18)
     ax.set_ylabel(r"$\sigma$ ($e^2/\hbar$)", fontsize=18)
@@ -129,10 +129,10 @@ def plot_type2(energy, sigma_xx, sigma_yy, sigma_zz,
     ax1 = axes[0]
     ax1.plot(energy, sigma_xx,    "r-",     label="BSE_xx")
     ax1.plot(energy, sigma_yy,    "orange", label="BSE_yy")
-    ax1.plot(energy, sigma_zz,    "g-",     label="BSE_zz")
+    # ax1.plot(energy, sigma_zz,    "g-",     label="BSE_zz")
     ax1.plot(energy, sigma_sp_xx, "b--",    label="IPA_xx")
     ax1.plot(energy, sigma_sp_yy, "c--",    label="IPA_yy")
-    ax1.plot(energy, sigma_sp_zz, ls="--",  c="navy", label="IPA_zz")
+    # ax1.plot(energy, sigma_sp_zz, ls="--",  c="navy", label="IPA_zz")
     ax1.set_ylabel(r"$\sigma$ ($e^2/\hbar$)", fontsize=18)
 
     ax2 = axes[1]
@@ -146,8 +146,8 @@ def plot_type2(energy, sigma_xx, sigma_yy, sigma_zz,
         ax2.bar(E_exc[mask_vx], E_exc[mask_vx]*Vx[mask_vx], width=0.03, alpha=0.3, label="xx")
     if mask_vy.any():
         ax2.bar(E_exc[mask_vy], E_exc[mask_vy]*Vy[mask_vy], width=0.03, alpha=0.3, label="yy")
-    if mask_vz.any():
-        ax2.bar(E_exc[mask_vz], E_exc[mask_vz]*Vz[mask_vz], width=0.03, alpha=0.3, label="zz")
+    # if mask_vz.any():
+    #     ax2.bar(E_exc[mask_vz], E_exc[mask_vz]*Vz[mask_vz], width=0.03, alpha=0.3, label="zz")
 
     ax2.set_ylabel(r"$|V^\alpha|^2$", fontsize=18)
     ax2.set_xlabel("E (eV)", fontsize=18)
