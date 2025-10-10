@@ -12,7 +12,8 @@ Defaults:
 - All points are used.
 
 Optional masks:
-- Numeric energy cutoff: --emask <float> keeps E <= cutoff.
+- Minimum energy cutoff: --emin <float> keeps E >= emin.
+- Maximum energy cutoff: --emask <float> keeps E <= emask.
 - "gap" masking: --emask gap --gapfile bandgap_vs_field.dat (2 columns: field, Egap).
   You can adjust with --gap-scale-field and --gap-margin.
 - Field zoom: --fzoom <float> keeps |field| <= fzoom.
@@ -21,12 +22,6 @@ Optional overlay (no masking):
 - --overlay-gap --gapfile bandgap_vs_field.dat
   Plots a dashed line of Egap(field) on top of the heatmap as reference.
   Honors --gap-scale-field and --gap-margin for the overlay curve only.
-
-Examples:
-  python surface.py --file shift_sp_shiftvector_field.dat
-  python surface.py --file shift_sp_shiftvector_field.dat --overlay-gap --gapfile bandgap_vs_field.dat
-  python surface.py --file shift_sp_shiftvector_field.dat --emask 4.8 --fzoom 0.008
-  python surface.py --file shift_sp_shiftvector_field.dat --emask gap --gapfile bandgap_vs_field.dat --gap-margin 0.4
 """
 
 import os
@@ -156,11 +151,13 @@ def load_two_col_float(path, colx=0, coly=1):
 # -----------------------------
 # Mask logic (all optional)
 # -----------------------------
-def apply_masks(fields, energies, sigma, emask=None, fzoom=None,
+def apply_masks(fields, energies, sigma,
+                emin=None, emask=None, fzoom=None,
                 gapfile=None, gap_scale_field=1.0, gap_margin=0.0):
     """
     Apply optional masks. By default, does nothing.
 
+    - If emin is a float, keep E >= emin.
     - If emask is a float, keep E <= emask.
     - If emask == 'gap' and gapfile provided, keep E <= (1+gap_margin)*Egap(field*gap_scale_field).
     - If fzoom is a float > 0, keep |field| <= fzoom.
@@ -171,7 +168,11 @@ def apply_masks(fields, energies, sigma, emask=None, fzoom=None,
 
     keep = np.ones_like(E, dtype=bool)
 
-    # energy mask
+    # minimum energy (lower bound)
+    if emin is not None:
+        keep &= (E >= float(emin))
+
+    # maximum energy (upper bound) or gap-based bound
     if emask is None:
         pass
     elif isinstance(emask, str) and emask.lower() == "gap":
@@ -207,6 +208,41 @@ def apply_masks(fields, energies, sigma, emask=None, fzoom=None,
 
     return f, E, S
 
+def apply_diff(fields, energies, sigma):
+    """
+    Subtract sigma(E, F=0) baseline from all sigma values.
+    If F=0 is not present, interpolate sigma vs F to estimate sigma(E,0).
+    """
+    f = np.asarray(fields, float)
+    E = np.asarray(energies, float)
+    S = np.asarray(sigma, float)
+
+    out_S = np.empty_like(S)
+
+    # unique energies
+    unique_E = np.unique(np.round(E, 12))
+    for e0 in unique_E:
+        mask = np.isclose(E, e0, rtol=1e-12, atol=1e-12)
+        fvals = f[mask]
+        svals = S[mask]
+
+        if np.any(np.isclose(fvals, 0.0, atol=1e-12)):
+            # use exact F=0 value
+            baseline = float(np.mean(svals[np.isclose(fvals, 0.0, atol=1e-12)]))
+        elif fvals.size >= 2:
+            # interpolate sigma(F) to F=0
+            try:
+                baseline = float(np.interp(0.0, fvals, svals))
+            except Exception:
+                baseline = float(svals[np.argmin(np.abs(fvals))])
+        else:
+            # fallback to nearest
+            baseline = float(svals[0])
+
+        out_S[mask] = svals - baseline
+
+    return f, E, out_S
+
 
 # -----------------------------
 # Grid + plot
@@ -214,7 +250,7 @@ def apply_masks(fields, energies, sigma, emask=None, fzoom=None,
 def plot_heatmap(fields, energies, sigma,
                  nx=600, ny=600, method="linear",
                  cmap_name=DEFAULT_CMAP, out="colormap.png",
-                 xlabel="Energy (eV)", ylabel="Field Intensity (m eV/Ang)",
+                 xlabel="Energy (eV)", ylabel=r"Field Intensity (m eV$/\mathrm \AA$)",
                  overlay=None):
     """
     overlay: dict or None. If provided, expects keys:
@@ -288,33 +324,43 @@ def plot_heatmap(fields, energies, sigma,
         cf = ax.contourf(Xi, Yi * 1000.0, Zi, levels=levels, cmap=cmap, norm=norm, extend="both")
         cf.set_edgecolor("face")
         cbar = plt.colorbar(cf, ax=ax, pad=0.01)
-        cbar.set_label(r"$\sigma^{(2)}_{xxx}$ (nm$\cdot\mu$A/V$^2$)", fontsize=16, rotation=270, labelpad=18)
+        if overlay is not None and "diff" in overlay.get("mode", ""):
+            cbar.set_label(r"$\Delta\sigma^{(2)}_{xxx}$ (nm$\cdot\mu$A/V$^2$)", fontsize=16,
+                           rotation=270, labelpad=18)
+        else:
+            cbar.set_label(r"$\sigma^{(2)}_{xxx}$ (nm$\cdot\mu$A/V$^2$)", fontsize=16,
+                           rotation=270, labelpad=18)
+
         ax.contour(Xi, Yi * 1000.0, Zi, levels=np.linspace(-vmax, vmax, 12), colors="white", linewidths=0.6)
     else:
         # final fallback: scatter so you see data instead of a blank figure
         print("[surface] interpolation not possible; drawing scatter fallback.")
         sc = ax.scatter(Eu, fu * 1000.0, c=Su, s=8, cmap=cmap)
         cbar = plt.colorbar(sc, ax=ax, pad=0.01)
-        cbar.set_label(r"$\sigma^{(2)}_{xxx}$ (nm$\cdot\mu$A/V$^2$)", fontsize=16, rotation=270, labelpad=18)
+        if overlay is not None and "diff" in overlay.get("mode", ""):
+            cbar.set_label(r"$\Delta\sigma^{(2)}_{xxx}$ (nm$\cdot\mu$A/V$^2$)", fontsize=16,
+                           rotation=270, labelpad=18)
+        else:
+            cbar.set_label(r"$\sigma^{(2)}_{xxx}$ (nm$\cdot\mu$A/V$^2$)", fontsize=16,
+                           rotation=270, labelpad=18)
 
     # 5) optional Egap overlay (no masking)
     if overlay is not None:
         Eg = np.asarray(overlay.get("Egap", []), float)
         Fg = np.asarray(overlay.get("F", []), float)
         if Eg.size and Fg.size and Eg.size == Fg.size:
-            # sort by energy for a clean line
+            # sort by FIELD to avoid zig-zag for V-shaped curves
             idx = np.argsort(Fg)
             Eg = Eg[idx]
             Fg = Fg[idx]
             ax.plot(
                 Eg, Fg * 1000.0,
-                linestyle=overlay.get("ls", "-.-"),
+                linestyle=overlay.get("ls", "--"),
                 linewidth=float(overlay.get("lw", 1.6)),
                 color=overlay.get("color", "magenta"),
                 alpha=float(overlay.get("alpha", 0.9)),
                 label=overlay.get("label", "Egap(field)")
             )
-            # optional legend only if we actually draw the line
             # ax.legend(loc="best", frameon=False)
 
     # axes cosmetics
@@ -340,8 +386,10 @@ def parse_args():
     p.add_argument("--file", required=True, help="file name inside each field folder to read")
     p.add_argument("--ycol", type=int, default=1, help="column index for sigma (default 1 = xx)")
     # masks off by default:
+    p.add_argument("--emin", type=float, default=None,
+                   help="minimum energy cutoff: keep E >= emin (default: no lower bound)")
     p.add_argument("--emask", default=None,
-                   help="energy mask: float cutoff (e.g. 4.8) or 'gap' to use --gapfile; default: no mask")
+                   help="maximum energy cutoff: float (E <= emask) or 'gap' to use --gapfile (default: no upper bound)")
     p.add_argument("--fzoom", type=float, default=None, help="limit |field| <= fzoom (eV/Ang); default: no zoom")
     p.add_argument("--gapfile", default=None, help="path to bandgap vs field table (2 columns: field, Egap)")
     p.add_argument("--gap-scale-field", type=float, default=1.0,
@@ -350,9 +398,9 @@ def parse_args():
                    help="relative margin on Egap for masking or overlay (Egap -> Egap*(1+margin))")
     # overlay controls
     p.add_argument("--overlay-gap", action="store_true", help="draw dashed Egap(field) reference line (no masking)")
-    p.add_argument("--gap-color", default="magenta", help="overlay line color (default 'k')")
+    p.add_argument("--gap-color", default="magenta", help="overlay line color")
     p.add_argument("--gap-lw", type=float, default=1.6, help="overlay line width")
-    p.add_argument("--gap-ls", default="--", help="overlay line style (default '--')")
+    p.add_argument("--gap-ls", default="--", help="overlay line style")
     p.add_argument("--gap-alpha", type=float, default=0.9, help="overlay line alpha")
     # grid/plot
     p.add_argument("--nx", type=int, default=600, help="grid points along energy")
@@ -360,7 +408,9 @@ def parse_args():
     p.add_argument("--interp", choices=["linear", "nearest", "cubic"], default="linear", help="griddata method")
     p.add_argument("--cmap", default=DEFAULT_CMAP, help="matplotlib or colorcet colormap name")
     p.add_argument("--latex", action="store_true", help="enable LaTeX rendering")
-    p.add_argument("--out", default="surface_sig-omega-field.png", help="output image filename (default auto)")
+    p.add_argument("--out", default="surface_sig-omega-field.png", help="output image filename")
+    p.add_argument("--diff", action="store_true", help="plot Δsigma(E,F) = sigma(E,F) - sigma(E,F=0)")
+
     return p.parse_args()
 
 
@@ -373,12 +423,18 @@ def main():
     # Apply masks (all optional; defaults do nothing)
     fields_m, energies_m, sigma_m = apply_masks(
         fields, energies, sigma,
+        emin=args.emin,
         emask=args.emask,
         fzoom=args.fzoom,
         gapfile=args.gapfile,
         gap_scale_field=args.gap_scale_field,
         gap_margin=args.gap_margin,
     )
+
+    # Apply --diff (subtract baseline at field=0)
+    if args.diff:
+        fields_m, energies_m, sigma_m = apply_diff(fields_m, energies_m, sigma_m)
+
 
     # Build optional overlay dict
     overlay = None
@@ -397,29 +453,11 @@ def main():
                 "label": "Egap(field)"
             }
 
-    # Auto output name if not provided
-    out = args.out
-    if out is None:
-        tag = os.path.splitext(os.path.basename(args.file))[0]
-        extra = []
-        if args.emask is not None:
-            if isinstance(args.emask, str) and args.emask.lower() == "gap":
-                extra.append("gapmask")
-            else:
-                extra.append(f"E<={args.emask}")
-        if args.fzoom is not None:
-            extra.append(f"|F|<={args.fzoom}")
-        if args.overlay_gap:
-            extra.append("overlay_gap")
-        suffix = "_" + "_".join(extra) if extra else ""
-        out = f"colormap_{tag}{suffix}.png".replace(" ", "")
-
-
     # Plot
     plot_heatmap(
         fields_m, energies_m, sigma_m,
         nx=args.nx, ny=args.ny, method=args.interp,
-        cmap_name=args.cmap, out=out,
+        cmap_name=args.cmap, out=args.out,
         overlay=overlay
     )
 

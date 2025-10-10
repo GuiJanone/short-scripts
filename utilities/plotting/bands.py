@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 import numpy as np
 import matplotlib.pyplot as plt
+import argparse
 import sys
 
-def plot_bands(filename, Efermi):
+def plot_bands(filename, Efermi, emin=None, emax=None):
     # Load data
     k_points, energies = np.loadtxt(filename, unpack=True)
 
@@ -20,31 +21,38 @@ def plot_bands(filename, Efermi):
     
     # Plot each segment separately
     for i, (start, end) in enumerate(zip(start_indices, end_indices)):
-        label = "Electronic Bands" if i == 0 else None
-        plt.plot(k_points[start:end], energies[start:end]-Efermi, 
-                 color='black', linewidth=1.5, label=label)
-    
-    # Add labels and title
+        plt.plot(k_points[start:end], energies[start:end] - Efermi,
+                 color='black', linewidth=1.5)
+
+    # Add labels
     plt.xlabel("k-space", fontsize=12)
     plt.ylabel("Energy (eV)", fontsize=12)
-    plt.title("Electronic Band Structure", fontsize=14)
+    # plt.title("Electronic Band Structure", fontsize=14)
+
     plt.xlim(0, k_points[end-1])
-    # plt.ylim(-10, 3)
-    
-    # Add grid and legend
+
+    # Apply energy limits if provided
+    if emin is not None or emax is not None:
+        plt.ylim(
+            emin if emin is not None else plt.ylim()[0],
+            emax if emax is not None else plt.ylim()[1]
+        )
+
+    # Add grid
     plt.grid(True, linestyle='--', alpha=0.6)
-    plt.legend()
-    
-    # Show the plot
+
+    # Save figure
     plt.tight_layout()
     plt.savefig("bands.png", dpi=600)
-    # plt.show()
+    print("Saved figure as bands.png")
+
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print("Usage: python3 script.py <filename> <fermi energy>")
-        sys.exit(1)
-    
-    filename = sys.argv[1]
-    Efermi = float(sys.argv[2])
-    plot_bands(filename, Efermi)
+    parser = argparse.ArgumentParser(description="Plot electronic band structure")
+    parser.add_argument("filename", help="input file with k-points and energies")
+    parser.add_argument("fermi", type=float, help="Fermi energy (eV)")
+    parser.add_argument("--emin", type=float, default=None, help="minimum energy for y-axis (eV)")
+    parser.add_argument("--emax", type=float, default=None, help="maximum energy for y-axis (eV)")
+    args = parser.parse_args()
+
+    plot_bands(args.filename, args.fermi, emin=args.emin, emax=args.emax)
