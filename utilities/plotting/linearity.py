@@ -201,7 +201,7 @@ def plot_sigma_field(
     ax0.set_xlim(np.min(mField), np.max(mField))
 
     if compute_derivative and ax1 is not None:
-        ax1.set_xlabel(r"Field $E_{\mathrm{DC}}$ (meV$/$\AA)", fontsize=12)
+        ax1.set_xlabel(r"Field $E_{\mathrm{DC}}$ (mV$/$\AA)", fontsize=12)
         if label is None:
             ax1.set_ylabel(r"$d\sigma^{(2)}_{xxx}/dE$ (nm$^2\cdot\mu$A/V$^3$)", fontsize=12)
         else:
@@ -213,7 +213,7 @@ def plot_sigma_field(
         ax1.grid(True, alpha=0.3)
         ax1.set_xlim(np.min(mField), np.max(mField))
     else:
-        ax0.set_xlabel(r"Field $E_{\mathrm{DC}}$ (meV$/$\AA)", fontsize=12)
+        ax0.set_xlabel(r"Field $E_{\mathrm{DC}}$ (mV$/$\AA)", fontsize=12)
 
 
     # colorbar for energy
@@ -227,7 +227,7 @@ def plot_sigma_field(
     cbar.set_label("Photon energy (eV)", rotation=270, labelpad=15)
 
     plt.savefig(f"linearity_{label}.png", dpi=800, bbox_inches="tight")
-    plt.show()
+    # plt.show()
 
 
 def parse_args():

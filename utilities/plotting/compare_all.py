@@ -16,7 +16,7 @@ Args:
   --out    : output image filename (we append _diff if --diff)
   --title  : optional plot title
 
-Curves are colored by field; colorbar shows field in meV/Ang.
+Curves are colored by field; colorbar shows field in mV/Ang.
 """
 
 import os
@@ -32,7 +32,7 @@ from matplotlib.ticker import MaxNLocator, FormatStrFormatter
 # keep your colormap
 import colorcet as cc  # noqa: F401
 CMAP_NAME = "cet_bkr"
-CBAR_LABEL = r"Field $E_{\mathrm{DC}}$ (meV/$\mathrm{\AA}$)"
+CBAR_LABEL = r"Field $E_{\mathrm{DC}}$ (mV/$\mathrm{\AA}$)"
 
 
 def configure_matplotlib(fontsize=15):
@@ -176,13 +176,13 @@ def apply_diff(energy, series):
 def plot_compare_all(energy, series, fields, label, out="compare_all.png", title=None, diff=False):
     """
     Plot one curve per field for the selected data column.
-    Color encodes field value; colorbar shows field in meV/Ang.
+    Color encodes field value; colorbar shows field in mV/Ang.
     """
     fig, ax = plt.subplots(figsize=(9, 5.5))
 
-    # use meV/Ang for the color scale to match the colorbar label
-    fields_meV = fields * 1000.0
-    vmin, vmax = float(np.min(fields_meV)), float(np.max(fields_meV))
+    # use mV/Ang for the color scale to match the colorbar label
+    fields_mV = fields * 1000.0
+    vmin, vmax = float(np.min(fields_mV)), float(np.max(fields_mV))
     # norm = Normalize(vmin=vmin, vmax=vmax)
 
     norm = SymLogNorm(linthresh=2e-0, linscale=1.0,
@@ -206,7 +206,7 @@ def plot_compare_all(energy, series, fields, label, out="compare_all.png", title
         print("Nothing to plot after filtering. Exiting.")
         return
 
-    # colorbar for field value (meV/Ang)
+    # colorbar for field value (mV/Ang)
     cbar = plt.colorbar(sm, ax=ax, pad=0.015)
     cbar.set_label(CBAR_LABEL)
 

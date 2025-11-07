@@ -36,6 +36,15 @@ import matplotlib.pyplot as plt
 REGULAR_KEYS = ["xxx", "xyy", "yyy", "yxx"]
 Z_KEYS       = ["xxz", "yyz", "zzz", "zxx", "zyy"]
 
+def configure_matplotlib(fontsize=15):
+    plt.rcParams.update({"text.usetex": True, "font.family": "serif"})
+    plt.rcParams["axes.labelsize"] = fontsize
+    plt.rcParams["axes.titlesize"] = fontsize
+    plt.rcParams["xtick.labelsize"] = fontsize
+    plt.rcParams["ytick.labelsize"] = fontsize
+    plt.rcParams["legend.fontsize"] = fontsize
+    plt.rcParams["font.size"] = fontsize
+
 def is_z_schema(path):
     base = os.path.splitext(os.path.basename(path))[0]
     return base.endswith("_z")
@@ -90,8 +99,8 @@ def plot_components(energy, series, out="shift_current.png", title=None, xlim=No
     fig, ax = plt.subplots(figsize=(8, 5))
     for label, y in series:
         ax.plot(energy, y, label=label, alpha=0.85, lw=2.0)
-    ax.set_xlabel("E (eV)", fontsize=14)
-    ax.set_ylabel("sigma^(2) (uA/V^2 * nm)", fontsize=14)
+    ax.set_xlabel(r"Photon Energy $\omega$ (eV)", fontsize=14)
+    ax.set_ylabel(r"$\sigma^{2}$ (nm $\cdot \mu$A / V$^{2}$)", fontsize=14)
     if xlim is None:
         ax.set_xlim(float(energy[0]), float(energy[-1]))
     else:

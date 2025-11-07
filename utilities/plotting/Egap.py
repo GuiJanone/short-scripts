@@ -91,6 +91,9 @@ ax[1].set_ylabel(r"$d E_{\text{gap}}/d E_{DC}$")
 # ax[0].set_ylim(1.5, 1.75)
 # ax[1].set_ylim(-0.01, 0.01)
 
+# after creating ax
+ax[0].ticklabel_format(axis='y', style='plain', useOffset=False)
+ax[1].ticklabel_format(axis='y', style='plain', useOffset=False)  # if needed
 ax[0].grid(True)
 ax[1].grid(True)
 
