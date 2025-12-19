@@ -1,0 +1,24 @@
+{
+  "omesp_file": "ome_linear_sp_crsbr.100.y.3.0.omesp",
+  "omeexk_file": "ome_linear_ex_k_crsbr.100.y.3.0.omeexk",
+  "out_dir": "vme_plots/contour/excitons",
+  "mode": "contour",
+  "component": "y",
+  "value": "imag",
+  "pairs": [
+    [0,2],
+    [0,3],
+    [1,2],
+    [1,3]
+  ],
+  "excitons":[1,7,26],
+  "order": "row",
+  "kpath_file": "kpath.txt",
+  "path_plot_real_imag": true,
+  "closed": false,
+  "use_kdist": true,
+  "contour_use_tri": true,
+  "max_pairs": 64,
+  "interp_nx": 1000,
+  "interp_ny": 1000
+}

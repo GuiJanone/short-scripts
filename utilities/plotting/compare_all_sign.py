@@ -26,20 +26,21 @@ from matplotlib.colors import LinearSegmentedColormap
 CMAP_NAME = LinearSegmentedColormap.from_list(
     "black_red", [(0.0, "black"), (0.5, "#8b0000"), (1.0, "red")]
 )
-CBAR_LABEL = r"Field $E_{\mathrm{DC}}$ (meV/$\mathrm{\AA}$)"
+CBAR_LABEL = r"Field $E_{\mathrm{DC}}$ (mV/$\mathrm{\AA}$)"
 
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 # Hardcoded sign filter: choose "positive" or "negative"
 KEEP_ONLY_SIGN = "positive"   # change to "negative" if you want only negative fields
 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
-def configure_matplotlib(fontsize=15):
+def configure_matplotlib(fontsize=18):
     plt.rcParams.update({"text.usetex": True, "font.family": "serif"})
-    plt.rcParams["axes.labelsize"] = fontsize+2
+    plt.rcParams["axes.labelsize"] = fontsize+4
     plt.rcParams["axes.titlesize"] = fontsize+4
     plt.rcParams["xtick.labelsize"] = fontsize
     plt.rcParams["ytick.labelsize"] = fontsize
-    plt.rcParams["legend.fontsize"] = fontsize
+    plt.rcParams["legend.fontsize"] = fontsize+2
+    # plt.rcParams["font.size"] = fontsize
 
 def find_numeric_folders():
     out = []
@@ -231,8 +232,7 @@ def plot_compare_all(energy, series, fields, label,
     cbar.ax.yaxis.set_major_formatter(FormatStrFormatter("%.1f"))
     cbar.update_ticks()
 
-    plt.tight_layout()
-    plt.savefig(out, dpi=600)
+    plt.savefig(out, dpi=600, bbox_inches='tight')
     print(f"Saved: {out}")
     # plt.show()
 

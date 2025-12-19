@@ -9,14 +9,15 @@ import matplotlib.cm as cm
 from matplotlib.ticker import AutoMinorLocator
 import argparse
 
-def configure_matplotlib(fontsize=15):
+def configure_matplotlib(fontsize=18):
     plt.rcParams.update({"text.usetex": True, "font.family": "serif"})
-    plt.rcParams["axes.labelsize"] = fontsize
-    plt.rcParams["axes.titlesize"] = fontsize
+    plt.rcParams["axes.labelsize"] = fontsize+2
+    plt.rcParams["axes.titlesize"] = fontsize+2
     plt.rcParams["xtick.labelsize"] = fontsize
     plt.rcParams["ytick.labelsize"] = fontsize
-    plt.rcParams["legend.fontsize"] = fontsize
-    plt.rcParams["font.size"] = fontsize
+    plt.rcParams["legend.fontsize"] = fontsize+2
+    # plt.rcParams["font.size"] = fontsize
+
 
 
 # default Egap (can be overridden with --egap)
@@ -190,9 +191,9 @@ def plot_sigma_field(
 
     # decorate axes
     if label is None:
-        ax0.set_ylabel(r"$\sigma^{(2)}_{xxx}$ (nm$\cdot\mu$A/V$^2$)", fontsize=12)
+        ax0.set_ylabel(r"$\sigma^{\(2\)}_{xxx}$ (nm$\cdot\mu$A/V$^2$)")
     else:
-        ax0.set_ylabel(rf"$\sigma^{(2)}_{{{label}}}$ (nm$\cdot\mu$A/V$^2$)", fontsize=12)
+        ax0.set_ylabel(fr"$\sigma^{{(2)}}_{{{label}}}$  (nm$\cdot\mu$A/V$^2$)")
     ax0.xaxis.set_minor_locator(AutoMinorLocator(5))
     ax0.tick_params(axis="x", which="minor", length=5)
     ax0.axhline(0, color="gray", linestyle=":", linewidth=1)
@@ -201,11 +202,11 @@ def plot_sigma_field(
     ax0.set_xlim(np.min(mField), np.max(mField))
 
     if compute_derivative and ax1 is not None:
-        ax1.set_xlabel(r"Field $E_{\mathrm{DC}}$ (mV$/$\AA)", fontsize=12)
+        ax1.set_xlabel(r"Field $E_{\mathrm{DC}}$ (mV$/$\AA)")
         if label is None:
-            ax1.set_ylabel(r"$d\sigma^{(2)}_{xxx}/dE$ (nm$^2\cdot\mu$A/V$^3$)", fontsize=12)
+            ax1.set_ylabel(r"$d\sigma^{{(2)}}_{xxx}/dE$ (nm$^2\cdot\mu$A/V$^3$)")
         else:
-            ax1.set_ylabel(rf"$d\sigma^{(2)}_{{{label}}}/dE$ (nm$^2\cdot\mu$A/V$^3$)", fontsize=12)
+            ax1.set_ylabel(rf"$d\sigma^{{(2)}}_{{{label}}}/dE$ (nm$^2\cdot\mu$A/V$^3$)")
         ax1.xaxis.set_minor_locator(AutoMinorLocator(5))
         ax1.tick_params(axis="x", which="minor", length=5)
         ax1.axhline(0, color="gray", linestyle=":", linewidth=1)
@@ -213,7 +214,7 @@ def plot_sigma_field(
         ax1.grid(True, alpha=0.3)
         ax1.set_xlim(np.min(mField), np.max(mField))
     else:
-        ax0.set_xlabel(r"Field $E_{\mathrm{DC}}$ (mV$/$\AA)", fontsize=12)
+        ax0.set_xlabel(r"Field $E_{\mathrm{DC}}$ (mV$/$\AA)")
 
 
     # colorbar for energy
@@ -224,7 +225,7 @@ def plot_sigma_field(
     ticks = np.linspace(float(Esel.min()), float(Esel.max()), 7)
     cbar.set_ticks(ticks)
     cbar.set_ticklabels([f"{t:.2f}" for t in ticks])
-    cbar.set_label("Photon energy (eV)", rotation=270, labelpad=15)
+    cbar.set_label("Photon energy (eV)", rotation=270, labelpad=25)
 
     plt.savefig(f"linearity_{label}.png", dpi=800, bbox_inches="tight")
     # plt.show()

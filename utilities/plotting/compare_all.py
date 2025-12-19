@@ -35,13 +35,13 @@ CMAP_NAME = "cet_bkr"
 CBAR_LABEL = r"Field $E_{\mathrm{DC}}$ (mV/$\mathrm{\AA}$)"
 
 
-def configure_matplotlib(fontsize=15):
+def configure_matplotlib(fontsize=18):
     plt.rcParams.update({"text.usetex": True, "font.family": "serif"})
-    plt.rcParams["axes.labelsize"] = fontsize+2
+    plt.rcParams["axes.labelsize"] = fontsize+4
     plt.rcParams["axes.titlesize"] = fontsize+4
     plt.rcParams["xtick.labelsize"] = fontsize
     plt.rcParams["ytick.labelsize"] = fontsize
-    plt.rcParams["legend.fontsize"] = fontsize
+    plt.rcParams["legend.fontsize"] = fontsize+2
     # plt.rcParams["font.size"] = fontsize
 
 
