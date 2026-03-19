@@ -1,23 +1,35 @@
 #!/usr/bin/env python3
-# vme_linear_plot.py
-#
-# Reads:
-#   1) ome_linear_sp_*.omesp  (k-resolved SP vme matrix elements for band pairs)
-#   2) ome_linear_ex_k_*.omeexk (k-resolved excitonic contributions V_{0N}(k))
-#
-# Plots:
-#   - SP band-pair-resolved vme (path/contour)
-#   - excitonic k-resolved V0N(k) for chosen exciton indices (path/contour)
-#
-# New features:
-#   - Contour colormap:
-#       value=abs  -> Reds
-#       value=real/imag -> seismic
-#   - Path option to plot real and imag together on the same axes:
-#       config: "path_plot_real_imag": true
-#       cli: --plot-real-imag
-#
-# ASCII-only.
+"""
+Shift vector colorplot plotter from .omesp files.
+
+Reads nonlinear optical matrix elements (.omesp files) and creates 2D color plots
+of shift vectors over the Brillouin zone.
+
+File format (from Fortran ome_sp.f90):
+- Header: iflag_norder
+- For each k-point ibz:
+  - Line 1: rkx rky rkz eigenvalues(1:nband_ex)
+  - For each band pair (i,j):
+    - vme line
+    - berry_eigen line
+    - shift_vector lines (3 directions)
+    - gen_der lines (3 directions)
+
+JSON Configuration:
+{
+  "file": "path/to/ome_nonlinear_sp.omesp",
+  "output_dir": "./figs",
+  "band_pair": [1, 1],           (optional: specific band pair to plot, default: average all)
+  "component": 1,                (optional: vector component (1/2/3) or "magnitude", default: 1)
+  "colormap": "viridis",         (optional: matplotlib colormap)
+  "vmin": -0.5,                  (optional: colorbar min)
+  "vmax": 0.5                    (optional: colorbar max)
+}
+
+Examples:
+  python vme_linear_plot.py config.json
+  python vme_linear_plot.py --generate-example config.json
+"""
 
 from __future__ import annotations
 
@@ -68,6 +80,10 @@ class Config:
     # NEW: for mode=path, plot both real and imag on the same axes
     path_plot_real_imag: bool = False
 
+    # Shift vector options
+    plot_shift_vectors: bool = False  # Plot shift vectors in addition to/instead of vme
+    shift_direction: int = 0          # 0=all, 1=x, 2=y, 3=z (shift vector direction index)
+
 
 def _safe_mkdir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
@@ -112,6 +128,8 @@ def load_config(path: str) -> Config:
         match_kpoints=bool(d.get("match_kpoints", True)),
         match_tol=float(d.get("match_tol", 1e-10)),
         path_plot_real_imag=bool(d.get("path_plot_real_imag", False)),
+        plot_shift_vectors=bool(d.get("plot_shift_vectors", False)),
+        shift_direction=int(d.get("shift_direction", 0)),
     )
 
 
@@ -119,6 +137,9 @@ def read_omesp_linear(path: str):
     k_list = []
     E_list = []
     vme_list = []
+    berry_list = []
+    shift_list = []
+    gen_der_list = []
 
     with open(path, "r") as f:
         header = f.readline()
@@ -138,8 +159,13 @@ def read_omesp_linear(path: str):
             nb = int(Es.size)
 
             vme_k = np.zeros((nb, nb, 3), dtype=np.complex128)
+            berry_k = np.zeros((nb, nb, 3), dtype=np.complex128)
+            shift_k = np.zeros((nb, nb, 3, 3), dtype=np.float64)  # (i, j, direction, component)
+            gen_der_k = np.zeros((nb, nb, 3, 3), dtype=np.complex128)  # (i, j, direction, component)
+
             for i in range(nb):
                 for j in range(nb):
+                    # Read vme line
                     vline = f.readline()
                     if not vline:
                         raise ValueError("Unexpected EOF while reading vme block.")
@@ -152,14 +178,57 @@ def read_omesp_linear(path: str):
                     vz = vals[4] + 1j * vals[5]
                     vme_k[i, j, :] = (vx, vy, vz)
 
+                    # Read berry_eigen line
+                    bline = f.readline()
+                    if not bline:
+                        raise ValueError("Unexpected EOF while reading berry_eigen block.")
+                    bparts = bline.strip().split()
+                    if len(bparts) < 9:
+                        raise ValueError(f"Bad berry_eigen line: '{bline.strip()}'")
+                    bvals = [float(x) for x in bparts[3:9]]
+                    bx = bvals[0] + 1j * bvals[1]
+                    by = bvals[2] + 1j * bvals[3]
+                    bz = bvals[4] + 1j * bvals[5]
+                    berry_k[i, j, :] = (bx, by, bz)
+
+                    # Read shift_vector lines (3 directions, real values only)
+                    for direction in range(3):
+                        sline = f.readline()
+                        if not sline:
+                            raise ValueError(f"Unexpected EOF while reading shift_vector direction {direction}.")
+                        sparts = sline.strip().split()
+                        if len(sparts) < 6:  # kx ky kz + 3 components
+                            raise ValueError(f"Bad shift_vector line: '{sline.strip()}'")
+                        shift_k[i, j, direction, :] = np.array([float(x) for x in sparts[3:6]], dtype=np.float64)
+
+                    # Read gen_der lines (3 directions, complex)
+                    for direction in range(3):
+                        gline = f.readline()
+                        if not gline:
+                            raise ValueError(f"Unexpected EOF while reading gen_der direction {direction}.")
+                        gparts = gline.strip().split()
+                        if len(gparts) < 9:  # kx ky kz + 3 components (real+imag)
+                            raise ValueError(f"Bad gen_der line: '{gline.strip()}'")
+                        gvals = [float(x) for x in gparts[3:9]]
+                        gx = gvals[0] + 1j * gvals[1]
+                        gy = gvals[2] + 1j * gvals[3]
+                        gz = gvals[4] + 1j * gvals[5]
+                        gen_der_k[i, j, direction, :] = (gx, gy, gz)
+
             k_list.append([kx, ky, kz])
             E_list.append(Es)
             vme_list.append(vme_k)
+            berry_list.append(berry_k)
+            shift_list.append(shift_k)
+            gen_der_list.append(gen_der_k)
 
     k = np.array(k_list, dtype=np.float64)
     E = np.array(E_list, dtype=np.float64)
     vme = np.array(vme_list, dtype=np.complex128)
-    return k, E, vme
+    berry = np.array(berry_list, dtype=np.complex128)
+    shift = np.array(shift_list, dtype=np.float64)  # (Nk, nb, nb, 3, 3)
+    gen_der = np.array(gen_der_list, dtype=np.complex128)  # (Nk, nb, nb, 3, 3)
+    return k, E, vme, berry, shift, gen_der
 
 
 def read_omeexk(path: str):
@@ -411,6 +480,19 @@ def plot_path_real_imag(x: np.ndarray, z: np.ndarray, xlabel: str, title: str, o
     plt.close(fig)
 
 
+def plot_path_shift_vector(x: np.ndarray, shift: np.ndarray, xlabel: str, title: str, out_png: str, direction_idx: int = 0) -> None:
+    """Plot shift vector component along path. direction_idx: 0=x, 1=y, 2=z"""
+    fig, ax = plt.subplots(figsize=(8.2, 4.1))
+    ax.plot(x, shift, lw=1.6)
+    ax.set_title(title)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel("shift vector (real)")
+    ax.grid(alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(out_png, dpi=220, bbox_inches="tight")
+    plt.close(fig)
+
+
 def plot_contour_interp(kx: np.ndarray, ky: np.ndarray, z: np.ndarray, nx: int, ny: int, title: str, out_png: str, cmap: str) -> None:
     if nx < 2 or ny < 2:
         raise ValueError("interp_nx and interp_ny must be >= 2")
@@ -531,6 +613,11 @@ def main() -> None:
     # NEW
     ap.add_argument("--plot-real-imag", action="store_true", help="(path mode) Plot real+imag together on same axes")
 
+    # Shift vector options
+    ap.add_argument("--plot-shift-vectors", action="store_true", help="Plot shift vectors from omesp file")
+    ap.add_argument("--shift-direction", type=int, default=None, choices=[0, 1, 2, 3], 
+                    help="Shift vector direction to plot: 0=all, 1=x, 2=y, 3=z")
+
     args = ap.parse_args()
 
     cfg = load_config(args.config) if args.config else None
@@ -582,6 +669,12 @@ def main() -> None:
     if args.plot_real_imag:
         path_plot_real_imag = True
 
+    # Shift vector options
+    plot_shift_vectors = bool(cfg.plot_shift_vectors if cfg else False)
+    if args.plot_shift_vectors:
+        plot_shift_vectors = True
+    shift_direction = int(args.shift_direction or (cfg.shift_direction if cfg else 0))
+
     if component not in AXIS_MAP:
         raise SystemExit("component must be x, y, or z")
 
@@ -592,9 +685,12 @@ def main() -> None:
     k_sp = None
     E_sp = None
     vme_sp = None
+    berry_sp = None
+    shift_sp = None
+    gen_der_sp = None
     nb = None
     if omesp_file is not None:
-        k_sp, E_sp, vme_sp = read_omesp_linear(omesp_file)
+        k_sp, E_sp, vme_sp, berry_sp, shift_sp, gen_der_sp = read_omesp_linear(omesp_file)
         nb = int(E_sp.shape[1])
 
     # Load EX
@@ -635,6 +731,9 @@ def main() -> None:
             k_sp = k_sp[idx, :]
             E_sp = E_sp[idx, :]
             vme_sp = vme_sp[idx, :, :, :]
+            berry_sp = berry_sp[idx, :, :, :]
+            shift_sp = shift_sp[idx, :, :, :, :]
+            gen_der_sp = gen_der_sp[idx, :, :, :, :]
         if k_ex is not None and not np.shares_memory(k_ex, k_ref):
             idx = match_k_order(k_ref, k_ex, tol=match_tol)
             k_ex = k_ex[idx, :]
@@ -705,6 +804,60 @@ def main() -> None:
                 plot_contour_interp(kx, ky, zc, interp_nx, interp_ny, title, out_png, cmap=cmap_contour)
 
             print(f"[OK] wrote SP contour plots to {out_dir}")
+
+    # -------------------------
+    # Plot Shift Vectors
+    # -------------------------
+    if shift_sp is not None and plot_shift_vectors:
+        pairs_final = determine_pairs(nb, pairs, max_pairs)
+        
+        # Determine which directions to plot
+        dirs_to_plot = []
+        if shift_direction == 0:  # plot all
+            dirs_to_plot = [0, 1, 2]
+        else:
+            dirs_to_plot = [shift_direction - 1]  # 1->0, 2->1, 3->2
+
+        dir_names = {0: "x", 1: "y", 2: "z"}
+
+        if mode == "path":
+            ko = k_ref[order, :]
+            x_raw, xlabel = get_x_for_path(ko)
+
+            for (i, j) in pairs_final:
+                if i < 0 or i >= nb or j < 0 or j >= nb:
+                    continue
+
+                for d_idx in dirs_to_plot:
+                    # shift_sp shape: (Nk, nb, nb, 3, 3) -> direction index d_idx, then component ax
+                    z = shift_sp[order, i, j, d_idx, ax]
+                    
+                    if not use_kdist:
+                        x_plot, y_plot = reduce_by_xbin(x_raw, z.astype(np.float64), tol=reduce_tol, method=reduce_method)
+                    else:
+                        x_plot, y_plot = x_raw, z
+
+                    d_name = dir_names[d_idx]
+                    title = f"shift_vector_{component} direction={d_name} bands (i,j)=({i},{j})"
+                    out_png = os.path.join(out_dir, f"shift_vector_{component}_{d_name}_i{i}_j{j}_path.png")
+                    plot_path_shift_vector(x_plot, y_plot, xlabel, title, out_png, direction_idx=d_idx)
+
+            print(f"[OK] wrote shift vector path plots to {out_dir}")
+
+        elif mode == "contour":
+            kx, ky = k_ref[:, 0], k_ref[:, 1]
+            for (i, j) in pairs_final:
+                if i < 0 or i >= nb or j < 0 or j >= nb:
+                    continue
+
+                for d_idx in dirs_to_plot:
+                    zc = shift_sp[:, i, j, d_idx, ax]
+                    d_name = dir_names[d_idx]
+                    title = f"shift_vector_{component} direction={d_name} bands (i,j)=({i},{j})"
+                    out_png = os.path.join(out_dir, f"shift_vector_{component}_{d_name}_i{i}_j{j}_contour.png")
+                    plot_contour_interp(kx, ky, zc, interp_nx, interp_ny, title, out_png, cmap="viridis")
+
+            print(f"[OK] wrote shift vector contour plots to {out_dir}")
 
     # -------------------------
     # Plot EX V0N(k)

@@ -43,7 +43,7 @@ contains
     subroutine LoadSystem()
         integer :: fp, ii, jj, i, j
         real(8) :: R, Im
-        real(8) :: a1, a1j, a2, a2j, a3, a3j
+        real(8) :: a1, a1j, a2, a2j, a3, a3j, xxx
 
         ! Read filename and electric field from command line
         call LoadArguments()
@@ -70,7 +70,7 @@ contains
                 end do
             end if
             read(fp, *) Degen((i - 1) * 15 + 1:(i - 1) * 15 + MOD(nFock, 15))
-            read(fp, *)
+
 
             ! Read Hamiltonian
             do i = 1, nFock
@@ -165,9 +165,9 @@ end subroutine applyField
 
             do ii = 1, mSize
                 do jj = 1, mSize
-                    write(fp, *) ii, jj, real(Rhop(1, i, ii, jj)), aimag(Rhop(1, i, ii, jj)), &
-                                       real(Rhop(2, i, ii, jj)), aimag(Rhop(2, i, ii, jj)), &
-                                       real(Rhop(3, i, ii, jj)), aimag(Rhop(3, i, ii, jj))
+                    write(fp, *) ii, jj, real(Rhop(1, i, jj, ii)), aimag(Rhop(1, i, jj, ii)), &
+                                         real(Rhop(2, i, jj, ii)), aimag(Rhop(2, i, jj, ii)), &
+                                         real(Rhop(3, i, jj, ii)), aimag(Rhop(3, i, jj, ii))
                 enddo
             enddo
 

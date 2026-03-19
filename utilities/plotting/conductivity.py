@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import sys
+import json
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -18,29 +19,47 @@ def configure_matplotlib(fontsize=15, markersize=110, use_latex=True):
     plt.rcParams["font.size"]        = fontsize
 
 
+def read_tensor_file(path):
+    """
+    Read a conductivity/tensor file where each row contains
+    omega xx xy xz yx yy yz zx zy zz
+    Returns a tuple ``(energy, data_dict)`` where ``data_dict``
+    maps component names (e.g. 'xx','xy',...) to numpy arrays.
+    """
+    energy = []
+    comps = {k: [] for k in ["xx", "xy", "xz", "yx", "yy", "yz", "zx", "zy", "zz"]}
+
+    with open(path, 'r') as f:
+        for raw in f:
+            parts = raw.split()
+            if not parts:
+                continue
+            vals = [float(v) for v in parts]
+            energy.append(vals[0])
+            comps["xx"].append(vals[1])
+            comps["xy"].append(vals[2])
+            comps["xz"].append(vals[3])
+            comps["yx"].append(vals[4])
+            comps["yy"].append(vals[5])
+            comps["yz"].append(vals[6])
+            comps["zx"].append(vals[7])
+            comps["zy"].append(vals[8])
+            comps["zz"].append(vals[9])
+
+    return np.array(energy), {k: np.array(v) for k, v in comps.items()}
+
+
+# keep the old helper names for backward compatibility,
+# they simply pull out the xx/yy/zz entries from the full tensor.
+
 def read_exciton_file(path):
     """
     Read exciton file: energy and BSE conductivities only.
     Returns:
       energy, sigma_xx, sigma_yy, sigma_zz
     """
-    energy = []
-    sigma_xx = []
-    sigma_yy = []
-    sigma_zz = []
-
-    with open(path, 'r') as f:
-        for raw in f:
-            parts = raw.split()
-            if not parts:
-                break
-            vals = [float(v) for v in parts]
-            energy.append(vals[0])
-            sigma_xx.append(vals[1])
-            sigma_yy.append(vals[5])
-            sigma_zz.append(vals[9])
-
-    return np.array(energy), np.array(sigma_xx), np.array(sigma_yy), np.array(sigma_zz)
+    energy, data = read_tensor_file(path)
+    return energy, data["xx"], data["yy"], data["zz"]
 
 
 def read_sp_file(path):
@@ -49,16 +68,8 @@ def read_sp_file(path):
     Returns:
       sigma_sp_xx, sigma_sp_yy, sigma_sp_zz
     """
-    sigma_sp_xx = []
-    sigma_sp_yy = []
-    sigma_sp_zz = []
-    with open(path, 'r') as f:
-        for raw in f:
-            vals = [float(v) for v in raw.split()]
-            sigma_sp_xx.append(vals[1])
-            sigma_sp_yy.append(vals[5])
-            sigma_sp_zz.append(vals[9])
-    return np.array(sigma_sp_xx), np.array(sigma_sp_yy), np.array(sigma_sp_zz)
+    _, data = read_tensor_file(path)
+    return data["xx"], data["yy"], data["zz"]
 
 
 def read_oscillator_file(path):
@@ -85,11 +96,15 @@ def read_oscillator_file(path):
 
 
 def print_header(plot_type, output_file):
-    """Prints a standardized header with current plot info."""
+    """Print a standardized header with current plot info.
+
+    ``plot_type`` is an arbitrary string describing the mode ("json",
+    "1", "2", etc.).
+    """
     print("===================================")
     print("       PLOTTING CONDUCTIVITY       ")
     print("===================================")
-    print(f"Selected plot type: {plot_type}")
+    print(f"Mode: {plot_type}")
     print(f"Output file: {output_file}")
     print()
 
@@ -97,9 +112,13 @@ def print_header(plot_type, output_file):
 def print_usage():
     print("Usage:")
     print("  script.py <exciton_file> <sp_file> [oscillator_file]")
+    print("  script.py <config.json>               # use JSON configuration")
+    print("  script.py --example                   # write example.json and exit")
     print()
     print("Running with two files does plot type 1.")
     print("Add a third file to get plot type 2.")
+    print("JSON input allows arbitrary datasets, tensor components, axis")
+    print("limits and offsets. See generated example.json for format.")
 
 
 def plot_type1(energy, sigma_xx, sigma_yy, sigma_zz,
@@ -163,7 +182,96 @@ def plot_type2(energy, sigma_xx, sigma_yy, sigma_zz,
     plt.savefig(output, dpi=600)
 
 
+def plot_multi(energies, datas, labels, components,
+               output="conductivity.png", xlim=None, ylim=None):
+    """Plot a collection of datasets and return the figure.
+
+    *energies* is a list of 1‑D numpy arrays (one per dataset).
+    *datas* is a list of dictionaries mapping tensor components to arrays.
+    *labels* provides a human‑readable name for each dataset.
+    *components* is the list of tensor components to draw (e.g. ['xx','xy']).
+    """
+    fig, ax = plt.subplots(figsize=(6.4, 4.8))
+    for energy, data, lab in zip(energies, datas, labels):
+        for comp in components:
+            arr = data.get(comp)
+            if arr is None:
+                continue
+            ax.plot(energy, arr, label=f"{lab}_{comp}")
+    ax.set_xlabel("E (eV)", fontsize=18)
+    ax.set_ylabel(r"$\sigma$ ($e^2/\hbar$)", fontsize=18)
+    if xlim is not None:
+        ax.set_xlim(xlim)
+    if ylim is not None:
+        ax.set_ylim(ylim)
+    ax.legend()
+    plt.tight_layout()
+    plt.savefig(output, dpi=600)
+    return fig
+
+
+def generate_example_json(path="example.json"):
+    """Write a skeleton configuration file to *path*."""
+    example = {
+        "datasets": [
+            {"path": "exciton.dat", "label": "BSE", "offset": 0.0},
+            {"path": "sp.dat", "label": "IPA", "offset": 0.0}
+        ],
+        "components": ["xx", "yy"],
+        "xlim": [0, 10],
+        "ylim": [0, 5],
+        "output": "conductivity.png"
+    }
+    with open(path, 'w') as f:
+        json.dump(example, f, indent=2)
+    print(f"Example JSON written to {path}")
+
+
+def run_from_json(config_path):
+    with open(config_path, 'r') as f:
+        cfg = json.load(f)
+
+    datasets = cfg.get('datasets', [])
+    if not datasets:
+        raise ValueError('configuration must contain a non‑empty "datasets" list')
+    components = cfg.get('components', [])
+    if not components:
+        raise ValueError('must specify at least one component in "components"')
+    xlim = cfg.get('xlim', None)
+    ylim = cfg.get('ylim', None)
+    output = cfg.get('output', 'conductivity.png')
+
+    energies = []
+    datas = []
+    labels = []
+    for ds in datasets:
+        path = ds['path']
+        lab = ds.get('label', path)
+        offset = ds.get('offset', 0.0)
+        energy, data = read_tensor_file(path)
+        energies.append(energy + offset)
+        datas.append(data)
+        labels.append(lab)
+
+    print_header('json', output)
+    configure_matplotlib()
+    plot_multi(energies, datas, labels, components,
+               output=output, xlim=xlim, ylim=ylim)
+    plt.show()
+
+
 def main():
+    # handle simple command-line flags first
+    if len(sys.argv) == 2 and sys.argv[1] in ('--example', '--generate-json'):
+        generate_example_json('example.json')
+        sys.exit(0)
+
+    # JSON configuration mode
+    if len(sys.argv) == 2 and sys.argv[1].lower().endswith('.json'):
+        run_from_json(sys.argv[1])
+        sys.exit(0)
+
+    # legacy behaviour for two or three files
     if len(sys.argv) < 3:
         print_usage()
         sys.exit(1)

@@ -5,22 +5,29 @@ compare_all.py
 Sweep numeric-named folders (field values), read a file in each,
 and plot a single selected column vs photon energy.
 
-Args:
-  --file   : filename inside each numeric folder
-  --ycol   : 1-based column index to plot (col 0 is energy)
-  --label  : optional label for that column (used in ylabel and optional legend)
-  --emin   : min energy (eV)
-  --emax   : max energy (eV)
-  --fmax   : max |field| (eV/Ang) from folder names
-  --diff   : plot Δsigma(E,F) = sigma(E,F) - sigma(E,0)
-  --out    : output image filename (we append _diff if --diff)
-  --title  : optional plot title
+Can be used with either a JSON config file (--config) or CLI options.
+
+JSON Config format:
+{
+  "file": "filename inside each numeric folder",
+  "ycol": 1,
+  "label": "optional label for column",
+  "emin": null,
+  "emax": null,
+  "fmax": null,
+  "diff": false,
+  "out": "output_filename.png",
+  "title": "optional plot title",
+  "latex": true,
+  "colormap_normalize": "linear"
+}
 
 Curves are colored by field; colorbar shows field in mV/Ang.
 """
 
 import os
 import sys
+import json
 import argparse
 import numpy as np
 import matplotlib.pyplot as plt
@@ -34,9 +41,29 @@ import colorcet as cc  # noqa: F401
 CMAP_NAME = "cet_bkr"
 CBAR_LABEL = r"Field $E_{\mathrm{DC}}$ (mV/$\mathrm{\AA}$)"
 
+# Default configuration
+DEFAULT_CONFIG = {
+    "file": None,
+    "ycol": None,
+    "label": None,
+    "emin": None,
+    "emax": None,
+    "fmax": None,
+    "diff": False,
+    "out": None,
+    "title": None,
+    "latex": True,
+    "colormap_normalize": "linear"
+}
 
-def configure_matplotlib(fontsize=18):
-    plt.rcParams.update({"text.usetex": True, "font.family": "serif"})
+ALLOWED_NORMALIZATIONS = ["linear", "log", "symlog"]
+
+
+def configure_matplotlib(fontsize=18, use_latex=True):
+    if not use_latex:
+        plt.rcParams["text.usetex"] = False
+    else:
+        plt.rcParams.update({"text.usetex": True, "font.family": "serif"})
     plt.rcParams["axes.labelsize"] = fontsize+4
     plt.rcParams["axes.titlesize"] = fontsize+4
     plt.rcParams["xtick.labelsize"] = fontsize
@@ -173,7 +200,126 @@ def apply_diff(energy, series):
     return out
 
 
-def plot_compare_all(energy, series, fields, label, out="compare_all.png", title=None, diff=False):
+def create_colormap_normalizer(fields_mV, normalize_type="linear"):
+    """
+    Create a normalizer for the colormap.
+    
+    Args:
+        fields_mV: array of field values in mV/Ang
+        normalize_type: one of "linear", "log", "symlog"
+    
+    Returns:
+        Normalize object
+    """
+    vmin, vmax = float(np.min(fields_mV)), float(np.max(fields_mV))
+    
+    if normalize_type.lower() == "log":
+        # For log normalization, handle negative values symmetrically
+        abs_max = max(abs(vmin), abs(vmax))
+        return SymLogNorm(
+            linthresh=0.2,
+            vmin=-abs_max,
+            vmax=abs_max,
+            base=10
+        )
+    elif normalize_type.lower() == "symlog":
+        return SymLogNorm(
+            linthresh=0.2,
+            vmin=vmin,
+            vmax=vmax,
+            base=10
+        )
+    else:  # linear (default)
+        return Normalize(vmin=vmin, vmax=vmax)
+
+
+def load_config_from_json(filepath):
+    """Load configuration from a JSON file."""
+    try:
+        with open(filepath, 'r') as f:
+            config = json.load(f)
+        return config
+    except FileNotFoundError:
+        raise RuntimeError(f"Configuration file not found: {filepath}")
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"Invalid JSON in {filepath}: {e}")
+
+
+def merge_configs(json_config, cli_args):
+    """
+    Merge JSON config with CLI arguments.
+    CLI arguments override JSON config values.
+    """
+    config = DEFAULT_CONFIG.copy()
+    
+    # Apply JSON config if provided
+    if json_config:
+        config.update(json_config)
+    
+    # Apply CLI overrides (only non-None values)
+    if cli_args.file:
+        config["file"] = cli_args.file
+    if cli_args.ycol:
+        config["ycol"] = cli_args.ycol
+    if cli_args.label:
+        config["label"] = cli_args.label
+    if cli_args.emin is not None:
+        config["emin"] = cli_args.emin
+    if cli_args.emax is not None:
+        config["emax"] = cli_args.emax
+    if cli_args.fmax is not None:
+        config["fmax"] = cli_args.fmax
+    if cli_args.diff:
+        config["diff"] = True
+    if cli_args.out:
+        config["out"] = cli_args.out
+    if cli_args.title:
+        config["title"] = cli_args.title
+    if cli_args.latex is not None:
+        config["latex"] = cli_args.latex
+    if cli_args.colormap_normalize:
+        config["colormap_normalize"] = cli_args.colormap_normalize
+    
+    return config
+
+
+def generate_example_json(filepath):
+    """Generate an example JSON configuration file."""
+    example_config = {
+        "file": "data.txt",
+        "ycol": 1,
+        "label": "sigma_xx",
+        "emin": 1.0,
+        "emax": 5.0,
+        "fmax": 0.1,
+        "diff": False,
+        "out": "compare_all.png",
+        "title": "Spectral comparison across field values",
+        "latex": True,
+        "colormap_normalize": "linear"
+    }
+    
+    try:
+        with open(filepath, 'w') as f:
+            json.dump(example_config, f, indent=2)
+        print(f"Example configuration saved to: {filepath}")
+        print("\nConfiguration options:")
+        print("  file: str - filename inside each numeric folder (required)")
+        print("  ycol: int - 1-based column index (col 0 is energy) (required)")
+        print("  label: str or null - label for the column (default: 'col{ycol}')")
+        print("  emin: float or null - minimum energy in eV (default: no limit)")
+        print("  emax: float or null - maximum energy in eV (default: no limit)")
+        print("  fmax: float or null - maximum |field| in eV/Ang (default: no limit)")
+        print("  diff: bool - plot Δsigma(E,F) instead of sigma(E,F)")
+        print("  out: str or null - output filename (auto-generated if null)")
+        print("  title: str or null - plot title (default: basename of file)")
+        print("  latex: bool - enable LaTeX rendering in labels")
+        print(f"  colormap_normalize: str - one of {ALLOWED_NORMALIZATIONS}")
+    except IOError as e:
+        raise RuntimeError(f"Could not write example config to {filepath}: {e}")
+
+
+def plot_compare_all(energy, series, fields, label, out="compare_all.png", title=None, diff=False, normalize_type="linear"):
     """
     Plot one curve per field for the selected data column.
     Color encodes field value; colorbar shows field in mV/Ang.
@@ -182,11 +328,10 @@ def plot_compare_all(energy, series, fields, label, out="compare_all.png", title
 
     # use mV/Ang for the color scale to match the colorbar label
     fields_mV = fields * 1000.0
-    vmin, vmax = float(np.min(fields_mV)), float(np.max(fields_mV))
-    # norm = Normalize(vmin=vmin, vmax=vmax)
+    
+    # Create appropriate normalizer
+    norm = create_colormap_normalizer(fields_mV, normalize_type)
 
-    norm = SymLogNorm(linthresh=2e-0, linscale=1.0,
-                  vmin=vmin, vmax=vmax, base=10)
     cmap = plt.get_cmap(CMAP_NAME)
     sm = cm.ScalarMappable(norm=norm, cmap=cmap)
     sm.set_array([])
@@ -220,7 +365,7 @@ def plot_compare_all(energy, series, fields, label, out="compare_all.png", title
     if diff:
         ax.set_ylabel(rf"$\Delta\sigma^{{(2)}}_{{{safe_label}}}$ (nm$\cdot\mu$A/V$^2$)")
     else:
-        ax.set_ylabel(rf"$\sigma^{{(2)}}_{{{safe_label}}}$ (nm$\cdot\mu$A/V$^2$)")
+        ax.set_ylabel(rf"$\\sigma^{{(2)}}_{{{safe_label}}}$ (nm$\cdot\mu$A/V$^2$)")
 
     # if title:
     #     ax.set_title(title)
@@ -243,29 +388,125 @@ def insert_diff_suffix(path):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Compare spectra across fields with field-colored curves (single series).")
-    ap.add_argument("--file", required=True, help="file to read inside each numeric folder")
-    ap.add_argument("--ycol", required=True,
-                    help="1-based column index to plot (col 0 is energy). Example: '1'")
-    ap.add_argument("--label", default=None,
-                    help="label for the selected column (used in ylabel); default 'col{ycol}'")
-    ap.add_argument("--emin", type=float, default=None, help="min energy (eV); default: no lower bound")
-    ap.add_argument("--emax", type=float, default=None, help="max energy (eV); default: no upper bound")
-    ap.add_argument("--fmax", type=float, default=None, help="max |field| (eV/Ang); default: no field filter")
-    ap.add_argument("--diff", action="store_true",
-                    help="plot Δsigma(E,F) = sigma(E,F) - sigma(E,0) and append '_diff' to output file")
-    ap.add_argument("--out", default=None, help="output image filename")
-    ap.add_argument("--title", default=None, help="optional plot title")
-    ap.add_argument("--latex", action="store_false", default=True, help="disable LaTeX rendering")
+    ap = argparse.ArgumentParser(
+        description="Compare spectra across fields with field-colored curves.",
+        epilog="Use --config to specify a JSON configuration file, or use individual CLI options. "
+               "Use --generate-example to create a template JSON file."
+    )
+    
+    # Config file option
+    ap.add_argument(
+        "--config",
+        default=None,
+        help="Path to JSON configuration file with parameters"
+    )
+    ap.add_argument(
+        "--generate-example",
+        default=None,
+        metavar="FILEPATH",
+        help="Generate an example JSON configuration file at the specified path and exit"
+    )
+    
+    # CLI options (can override config file)
+    ap.add_argument(
+        "--file",
+        default=None,
+        help="Filename inside each numeric folder"
+    )
+    ap.add_argument(
+        "--ycol",
+        default=None,
+        help="1-based column index to plot (col 0 is energy)"
+    )
+    ap.add_argument(
+        "--label",
+        default=None,
+        help="Label for the selected column (used in ylabel)"
+    )
+    ap.add_argument(
+        "--emin",
+        type=float,
+        default=None,
+        help="Min energy (eV)"
+    )
+    ap.add_argument(
+        "--emax",
+        type=float,
+        default=None,
+        help="Max energy (eV)"
+    )
+    ap.add_argument(
+        "--fmax",
+        type=float,
+        default=None,
+        help="Max |field| (eV/Ang)"
+    )
+    ap.add_argument(
+        "--diff",
+        action="store_true",
+        help="Plot Δsigma(E,F) = sigma(E,F) - sigma(E,0) and append '_diff' to output"
+    )
+    ap.add_argument(
+        "--out",
+        default=None,
+        help="Output image filename"
+    )
+    ap.add_argument(
+        "--title",
+        default=None,
+        help="Optional plot title"
+    )
+    ap.add_argument(
+        "--latex",
+        action="store_true",
+        default=None,
+        help="Enable LaTeX rendering (default: enabled)"
+    )
+    ap.add_argument(
+        "--no-latex",
+        action="store_false",
+        dest="latex",
+        help="Disable LaTeX rendering"
+    )
+    ap.add_argument(
+        "--colormap-normalize",
+        default=None,
+        choices=ALLOWED_NORMALIZATIONS,
+        metavar="{" + ",".join(ALLOWED_NORMALIZATIONS) + "}",
+        help="Colormap normalization type"
+    )
+    
     args = ap.parse_args()
-
-
-    configure_matplotlib()
+    
+    # Handle --generate-example
+    if args.generate_example:
+        generate_example_json(args.generate_example)
+        sys.exit(0)
+    
+    # Load JSON config if provided
+    json_config = None
+    if args.config:
+        json_config = load_config_from_json(args.config)
+    
+    # Merge configs
+    config = merge_configs(json_config, args)
+    
+    # Validate required parameters
+    if not config["file"]:
+        ap.error("--file is required (either via --config or --file)")
+    if not config["ycol"]:
+        ap.error("--ycol is required (either via --config or --ycol)")
+    
+    configure_matplotlib(use_latex=config["latex"])
+    
+    # Validate colormap_normalize
+    if config["colormap_normalize"] not in ALLOWED_NORMALIZATIONS:
+        ap.error(f"--colormap-normalize must be one of {ALLOWED_NORMALIZATIONS}")
 
     # Peek at one file to validate ycol range
     ncols = None
     for _, folder in find_numeric_folders():
-        test_path = os.path.join(folder, args.file)
+        test_path = os.path.join(folder, config["file"])
         if os.path.exists(test_path):
             try:
                 tmp = np.loadtxt(test_path)
@@ -278,29 +519,38 @@ def main():
         print("Error: could not find a readable data file to validate --ycol.")
         sys.exit(1)
 
-    ycol = validate_ycol(args.ycol, ncols)
-    label = args.label if args.label is not None else f"col{ycol}"
+    ycol = validate_ycol(config["ycol"], ncols)
+    label = config["label"] if config["label"] is not None else f"col{ycol}"
 
     # Default output filename if not provided
-    out = args.out if args.out is not None else f"compare_fields_{label}.png"
-    if args.diff:
+    out = config["out"] if config["out"] is not None else f"compare_fields_{label}.png"
+    if config["diff"]:
         out = insert_diff_suffix(out)
 
     energy, series, fields = collect_field_data(
-        filename=args.file,
+        filename=config["file"],
         ycol=ycol,
         label=label,
-        emin=args.emin,
-        emax=args.emax,
-        fmax=args.fmax
+        emin=config["emin"],
+        emax=config["emax"],
+        fmax=config["fmax"]
     )
 
     # Apply Δ if requested
-    if args.diff:
+    if config["diff"]:
         series = apply_diff(energy, series)
 
-    title = args.title if args.title is not None else os.path.basename(args.file)
-    plot_compare_all(energy, series, fields, label=label, out=out, title=title, diff=args.diff)
+    title = config["title"] if config["title"] is not None else os.path.basename(config["file"])
+    plot_compare_all(
+        energy,
+        series,
+        fields,
+        label=label,
+        out=out,
+        title=title,
+        diff=config["diff"],
+        normalize_type=config["colormap_normalize"]
+    )
 
 
 if __name__ == "__main__":
