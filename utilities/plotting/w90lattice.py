@@ -17,11 +17,20 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import matplotlib.colors as mcolors
 import sys
+import argparse
 
 #===============================================================#
 # PARSER
-filename = sys.argv[1]
-# bond_length = sys.argv[2]
+
+# Use argparse so we can add an optional `--raw-centres` flag
+parser = argparse.ArgumentParser(description='Plot / write Wannier-centres from seedname_tb.dat')
+parser.add_argument('filename', help='Path to seedname_tb.dat')
+parser.add_argument('plot_option', type=int, help='Plot option (1..5)')
+parser.add_argument('--raw-centres', action='store_true', dest='raw_centres',
+                    help='Write raw position-matrix centres (no translation to home cell)')
+args = parser.parse_args()
+filename = args.filename
+raw_centres_flag = args.raw_centres
 def parse_file(filename):
     with open(filename, 'r') as file:
         # Skip the header
@@ -64,8 +73,6 @@ def parse_file(filename):
         for n in range(nFock):
             # Read the iRn indices (X, Y, Z)
             iRn[n] = [int(x) for x in next(file).strip().split()]
-            if (iRn[n].any() == 0):
-                diag = n
             # Read the mSize x mSize matrix
             for _ in range(mSize * mSize):
                 line = next(file).strip()
@@ -105,6 +112,13 @@ def parse_file(filename):
                 next(file)
 
 
+        # Determine which block corresponds to R = (0,0,0)
+        diag_indices = np.where(np.all(iRn == 0, axis=1))[0]
+        if diag_indices.size > 0:
+            diag = int(diag_indices[0])
+        else:
+            diag = None
+
     return np.array(bravais_vectors), nFock, mSize, iRn, H, WF, diag  # Second set of Fock matrices (nFock x mSize x mSize x 3)
 
 #==============================================================#
@@ -117,6 +131,28 @@ def map_to_real_space(iRn, bravais_vectors):
     Map iRn indices to real-space positions using Bravais vectors.
     """
     return np.dot(iRn, bravais_vectors)
+
+
+def translate_home(cart, lattice):
+    """
+    Translate Cartesian coordinates into the home unit cell using the lattice.
+
+    cart : array-like, shape (N,3) or (3,)
+    lattice : array-like, shape (3,3) with rows = a1, a2, a3
+    """
+    cart = np.asarray(cart, dtype=float)
+    lattice = np.asarray(lattice, dtype=float)
+
+    inv_lat = np.linalg.inv(lattice)
+
+    # Convert to fractional coordinates (f such that r = f @ lattice)
+    frac = cart @ inv_lat
+
+    # Wrap into [0,1)
+    frac = frac % 1.0
+
+    # Convert back to Cartesian
+    return frac @ lattice
 
 def plot_orbitals_Ncoded(iRn, bravais_vectors, WF):
     """
@@ -448,30 +484,37 @@ def get_decay(iRn, bravais_vectors, WF, H, diag, decimals=3):
     
 #==============================================
 
-def write_motif(iRn, bravais, WF, H, diag):
+def write_motif(iRn, bravais, WF, H, diag, raw_centres=False):
+    """Write Wannier centres to wannier_centers.xyz.
+
+    If `raw_centres` is False (default), centres are translated into
+    the home unit cell using `translate_home`. If True, raw Cartesian
+    centres from the diagonal of the R=0 block are written unchanged.
+    """
     print("Fetching Wannier Centers...")
-    # Map iRn to real-space positions
-    real_space_positions = map_to_real_space(iRn, bravais)
 
-    # Extract only the diagonal elements from WF for the chosen block
-    orbital_positions = np.array([WF[diag, i, i, :] for i in range(min(WF.shape[1], WF.shape[2]))])
-    orbital_positions = np.real(orbital_positions)
+    if diag is None:
+        raise RuntimeError("Could not find R=(0,0,0) position-matrix block in seedname_tb.dat")
 
-    # Combine real-space positions with orbital positions
-    points = real_space_positions[diag, :] + orbital_positions[:, :]
+    # Raw Cartesian centres from WF diagonal at the R=0 block
+    raw = np.array([WF[diag, i, i, :].real for i in range(min(WF.shape[1], WF.shape[2]))])
+    if raw.size == 0:
+        raise RuntimeError("No diagonal centres found in the R=(0,0,0) block")
 
-    # Extract X, Y, Z coordinates
-    x, y, z = points[:, 0], points[:, 1], points[:, 2]
+    if raw_centres:
+        centres = raw
+        print("Writing raw Wannier centres from position matrix diagonal.")
+    else:
+        centres = translate_home(raw, bravais)
+        print("Writing Wannier centres translated to the home unit cell.")
 
     with open("wannier_centers.xyz", "w") as f:
-        f.write(f"{len(orbital_positions)}\n")
-        f.write(f" Wannier centres from diagonal of the 000 cell from _tb.dat\n")
-        for pos in orbital_positions:
+        f.write(f"{len(centres)}\n")
+        f.write(" Wannier centres from diagonal of the 000 cell from _tb.dat\n")
+        for pos in centres:
             f.write(f"X  {pos[0]:16.8f}  {pos[1]:16.8f}  {pos[2]:16.8f}\n")
-        f.close()
 
-
-    return print("Done. Positions written in 'wannier_centers.xyz'")
+    print("Done. Positions written in 'wannier_centers.xyz'")
 
 #==============================================
 #==============================================
@@ -480,7 +523,7 @@ def write_motif(iRn, bravais, WF, H, diag):
 # parser
 bravais, nFock, mSize, iRn, H, WF, diag  = parse_file(filename)
 
-plot_option = int(sys.argv[2])
+plot_option = args.plot_option
 if plot_option == 1:
     print("Plotting XY-Zcolor motif")
     plot_WF_xy_zcolor(iRn, bravais, WF, diag)
@@ -493,7 +536,7 @@ elif plot_option == 3:
 elif plot_option == 4:
     get_decay(iRn, bravais, WF, H, diag)
 elif plot_option == 5:
-    write_motif(iRn, bravais, WF, H, diag)
+    write_motif(iRn, bravais, WF, H, diag, raw_centres=raw_centres_flag)
 
 # plot_orbitals_Ncoded(iRn, bravais, WF)
 # plot_WF_xz(iRn, bravais, WF, diag)

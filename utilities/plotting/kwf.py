@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-kwf_plot.py — Plot excitonic wavefunctions from a KWF file.
+kwf_plot.py - Plot excitonic wavefunctions from a KWF file.
 
 Changes in this version:
 - Square plots by default (both figure shape and data extent).
@@ -166,7 +166,7 @@ def make_titles(n: int) -> List[str]:
 
 
 def plot_state_tripcolor(ax, kx, ky, wf, shading: str, cmap: str):
-    # shading ∈ {'flat','gouraud'}
+    # shading in {'flat','gouraud'}
     t = ax.tripcolor(kx, ky, wf, shading=shading, cmap=cmap)
     t.set_edgecolor("face")
     return t
@@ -181,6 +181,7 @@ def plot_state_tri_interp(ax, kx, ky, wf, bounds, grid_n: int, cmap: str):
     # Mask out NaNs to avoid artifacts at the convex hull boundary
     Zi = np.ma.masked_invalid(Zi)
     t = ax.pcolormesh(Xi, Yi, Zi, shading='auto', cmap=cmap)
+    t.set_edgecolor("face")
     return t
 
 
