@@ -22,7 +22,7 @@ import argparse
 #===============================================================#
 # PARSER
 
-# Use argparse so we can add an optional `--raw-centres` flag
+# Use argparse so we can add an optional '--raw-centres' flag
 parser = argparse.ArgumentParser(description='Plot / write Wannier-centres from seedname_tb.dat')
 parser.add_argument('filename', help='Path to seedname_tb.dat')
 parser.add_argument('plot_option', type=int, help='Plot option (1..5)')
@@ -487,8 +487,8 @@ def get_decay(iRn, bravais_vectors, WF, H, diag, decimals=3):
 def write_motif(iRn, bravais, WF, H, diag, raw_centres=False):
     """Write Wannier centres to wannier_centers.xyz.
 
-    If `raw_centres` is False (default), centres are translated into
-    the home unit cell using `translate_home`. If True, raw Cartesian
+    If 'raw_centres' is False (default), centres are translated into
+    the home unit cell using 'translate_home'. If True, raw Cartesian
     centres from the diagonal of the R=0 block are written unchanged.
     """
     print("Fetching Wannier Centers...")

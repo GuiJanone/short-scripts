@@ -6,3 +6,7 @@ __pycache__
 *.x
 *.o
 *.mod
+
+# other random outputs
+*.png
+*.png

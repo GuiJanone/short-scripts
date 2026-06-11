@@ -186,9 +186,11 @@ def read_rswf_file(path: str, hole_row: bool = True) -> RealSpaceData:
 
 
 def read_eigenvalues(path: str, n: int) -> np.ndarray:
-    """Read at least n eigenvalues, skipping non-numeric/header lines."""
+    """Read eigenvalues file: skip first three lines, then read n numeric values."""
     values: List[float] = []
     with open(path, "r", encoding="utf-8") as handle:
+        for _ in range(3):
+            next(handle, None)
         for line in handle:
             stripped = line.strip()
             if not stripped:
@@ -269,8 +271,9 @@ def combine_selected_states(plot_states: Sequence[PlotState]) -> List[PlotState]
 def combine_with_manual_degeneracies(
     plot_states: Sequence[PlotState],
     degeneracies: Sequence[int],
+    eigvals: Optional[np.ndarray] = None,
 ) -> List[PlotState]:
-    """Sum consecutive states according to explicit degeneracy groups."""
+    """Sum consecutive states according to explicit degeneracy groups and attach energies if available."""
     if sum(degeneracies) > len(plot_states):
         raise ValueError("The degeneracy groups contain more states than selected.")
 
@@ -281,17 +284,38 @@ def combine_with_manual_degeneracies(
         prob = np.sum([item.prob for item in group], axis=0)
         raw_indices = [idx for item in group for idx in item.raw_indices]
         label = "+".join(str(idx + 1) for idx in raw_indices)
+        
+        # Build title with energies if the eigenvalue file is loaded
+        if eigvals is not None:
+            energies = ", ".join(f"{eigvals[k]:.6f}" for k in range(offset, offset + degeneracy))
+            title = f"Exciton psi #{label}  E={energies}"
+        else:
+            title = f"Exciton psi #{label}"
+            
         combined.append(
             PlotState(
                 prob=prob,
-                title=f"Exciton psi #{label}",
+                title=title,
                 raw_indices=raw_indices,
             )
         )
         offset += degeneracy
 
     if offset < len(plot_states):
-        combined.extend(plot_states[offset:])
+        # Handle any leftover states that weren't explicitly grouped
+        for i in range(offset, len(plot_states)):
+            item = plot_states[i]
+            if eigvals is not None:
+                title = f"{item.title}  E={eigvals[i]:.6f}"
+            else:
+                title = item.title
+            combined.append(
+                PlotState(
+                    prob=item.prob,
+                    title=title,
+                    raw_indices=item.raw_indices,
+                )
+            )
     return combined
 
 
@@ -306,6 +330,7 @@ def combine_with_eigenvalue_threshold(
     while i < len(plot_states):
         group = [plot_states[i]]
         j = i + 1
+        # Compare eigenvalues mapped directly via identical indices matching the plot_states list
         while j < len(plot_states) and abs(eigvals[j] - eigvals[j - 1]) <= threshold:
             group.append(plot_states[j])
             j += 1
@@ -370,20 +395,92 @@ def centered_coordinates(
     return coords - hole_position[None, :], np.zeros(3, dtype=float)
 
 
-def project_to_plane(
+def project_points_to_plane(coords: np.ndarray, plane: str) -> np.ndarray:
+    """Project coordinates onto a 2D plane without density reduction."""
+    index_map = {"xy": (0, 1), "xz": (0, 2), "yz": (1, 2)}
+    i, j = index_map[plane]
+    return coords[:, [i, j]]
+
+
+def project_to_plane_exact(
     coords: np.ndarray,
     prob: np.ndarray,
     plane: str,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Project 3D density onto a 2D plane by summing over the missing coordinate."""
-    index_map = {"xy": (0, 1), "xz": (0, 2), "yz": (1, 2)}
-    i, j = index_map[plane]
-    points = coords[:, [i, j]]
+    """Project density by summing only exactly identical plane coordinates."""
+    points = project_points_to_plane(coords, plane)
 
     unique_points, inverse = np.unique(points, axis=0, return_inverse=True)
     projected_prob = np.zeros(unique_points.shape[0], dtype=float)
     np.add.at(projected_prob, inverse, prob)
     return unique_points[:, 0], unique_points[:, 1], projected_prob
+
+
+def infer_projection_bin_size(points: np.ndarray) -> float:
+    """Infer a projection bin size from median nearest spacing in plotted axes."""
+    differences: List[np.ndarray] = []
+    for axis in range(points.shape[1]):
+        values = np.unique(np.round(points[:, axis], decimals=8))
+        if values.size < 2:
+            continue
+        diffs = np.diff(np.sort(values))
+        positive = diffs[diffs > 0.0]
+        if positive.size:
+            differences.append(positive)
+
+    if not differences:
+        return 0.1
+
+    inferred = float(np.median(np.concatenate(differences)))
+    if inferred <= 0.0 or not np.isfinite(inferred):
+        return 0.1
+    return inferred
+
+
+def project_to_plane_binned(
+    coords: np.ndarray,
+    prob: np.ndarray,
+    plane: str,
+    bin_size: Optional[float],
+    reducer: str,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Project density onto a regular 2D grid and reduce probabilities per bin."""
+    points = project_points_to_plane(coords, plane)
+    if bin_size is None:
+        bin_size = infer_projection_bin_size(points)
+
+    origin = np.min(points, axis=0)
+    bin_indices = np.rint((points - origin) / bin_size).astype(int)
+    unique_bins, inverse = np.unique(bin_indices, axis=0, return_inverse=True)
+
+    if reducer == "sum":
+        projected_prob = np.zeros(unique_bins.shape[0], dtype=float)
+        np.add.at(projected_prob, inverse, prob)
+    elif reducer == "max":
+        projected_prob = np.full(unique_bins.shape[0], -np.inf, dtype=float)
+        np.maximum.at(projected_prob, inverse, prob)
+        projected_prob[~np.isfinite(projected_prob)] = 0.0
+    else:
+        raise ValueError(f"Unknown projection reducer: {reducer}")
+
+    projected_points = origin + unique_bins * bin_size
+    return projected_points[:, 0], projected_points[:, 1], projected_prob
+
+
+def project_density_to_plane(
+    coords: np.ndarray,
+    prob: np.ndarray,
+    plane: str,
+    projection: str,
+    bin_size: Optional[float],
+    reducer: str,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Dispatch density projection to exact-coordinate or binned reduction."""
+    if projection == "exact":
+        return project_to_plane_exact(coords, prob, plane)
+    if projection == "bin":
+        return project_to_plane_binned(coords, prob, plane, bin_size, reducer)
+    raise ValueError(f"Unknown projection mode: {projection}")
 
 
 def plane_labels(plane: str) -> Tuple[str, str]:
@@ -553,14 +650,26 @@ def marker_sizes(values: np.ndarray, args: argparse.Namespace) -> np.ndarray:
     return min_size + (args.marker_size - min_size) * scaled
 
 
-def axis_limits(values: np.ndarray, override: Optional[float]) -> Tuple[float, float]:
-    """Return symmetric limits unless an explicit absolute limit is provided."""
+def axis_limits(values: np.ndarray, override: Optional[float], symmetric: bool = True) -> Tuple[float, float]:
+    """Return axis limits. If symmetric=False, bounds to min/max with padding."""
     if override is not None:
         return -abs(override), abs(override)
-    bound = np.max(np.abs(values)) if values.size else 1.0
-    if bound == 0.0:
-        bound = 1.0
-    return -bound, bound
+    if values.size == 0:
+        return -1.0, 1.0
+        
+    if symmetric:
+        bound = np.max(np.abs(values))
+        if bound == 0.0:
+            bound = 1.0
+        return -bound, bound
+    else:
+        # Non-symmetric: Use min and max with a 20% padding margin
+        vmin, vmax = np.min(values), np.max(values)
+        vdist = vmax - vmin
+        if vdist == 0.0:
+            vdist = 1.0  # Avoid zero-width dimensions
+            
+        return vmin - 0.2 * abs(vmin if vmin != 0 else vdist), vmax + 0.2 * abs(vmax if vmax != 0 else vdist)
 
 
 def finite_aspect_limits(coords: np.ndarray, args: argparse.Namespace) -> Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]]:
@@ -592,12 +701,33 @@ def plot_state_2d(
 ) -> plt.Figure:
     """Create one 2D projected density plot."""
     prob = normalize_probability(plot_state.prob, args.normalize)
-    x, y, projected_prob = project_to_plane(coords, prob, args.plane)
-    hole_x, hole_y, _ = project_to_plane(
+    inferred_bin_size = None
+    if args.projection == "bin" and args.projection_bin_size is None:
+        inferred_bin_size = infer_projection_bin_size(
+            project_points_to_plane(coords, args.plane)
+        )
+    x, y, projected_prob = project_density_to_plane(
+        coords,
+        prob,
+        args.plane,
+        args.projection,
+        args.projection_bin_size,
+        args.projection_reducer,
+    )
+    hole_xy = project_points_to_plane(
         hole_position.reshape(1, 3),
-        np.array([1.0]),
         args.plane,
     )
+
+    if args.verbose:
+        bin_size = args.projection_bin_size
+        if bin_size is None:
+            bin_size = inferred_bin_size
+        bin_size_text = "n/a" if bin_size is None else f"{bin_size:.10g}"
+        print(f"Projection mode: {args.projection}")
+        print(f"Projection bin size: {bin_size_text}")
+        print(f"Number of original 3D points: {coords.shape[0]}")
+        print(f"Number of projected 2D points: {projected_prob.shape[0]}")
 
     norm = color_norm(projected_prob, args)
 
@@ -611,8 +741,8 @@ def plot_state_2d(
         norm=norm,
         edgecolors="none",
     )
-    ax.scatter(hole_x[0], hole_y[0], c="red", s=args.hole_marker_size, label="Hole")
-    ax.legend(loc="best")
+    ax.scatter(hole_xy[0, 0], hole_xy[0, 1], c="red", s=args.hole_marker_size, label="Hole")
+    ax.legend(loc="upper right")
 
     xlabel, ylabel = plane_labels(args.plane)
     ax.set_xlabel(args.xlabel if args.xlabel is not None else xlabel)
@@ -622,11 +752,30 @@ def plot_state_2d(
     if args.square:
         ax.set_aspect("equal", adjustable="box")
         lim = max(np.max(np.abs(x)), np.max(np.abs(y)), 1.0)
-        ax.set_xlim(-lim, lim)
-        ax.set_ylim(-lim, lim)
+        xlim = (-lim, lim)
+        ylim = (-lim, lim)
     else:
-        ax.set_xlim(axis_limits(x, args.xlim))
-        ax.set_ylim(axis_limits(y, args.ylim))
+        # 1. Horizontal Axis (In-plane periodic dimension): Keep tight to the grid edges
+        x_min, x_max = np.min(x), np.max(x)
+        if x_min == x_max:  # Avoid zero-width dimensions
+            x_min, x_max = x_min - 1.0, x_max + 1.0
+        xlim = (x_min, x_max)
+        
+        # 2. Vertical Axis (Out-of-plane dimension): Apply a 10% padding margin
+        y_min, y_max = np.min(y), np.max(y)
+        y_dist = y_max - y_min
+        if y_dist == 0.0:
+            y_dist = 1.0
+            
+        # Pad symmetrically outwards by 10% of the span
+        ylim = (y_min - 0.1 * y_dist, y_max + 0.1 * y_dist)
+
+    if args.xlim is not None:
+        xlim = (-abs(args.xlim), abs(args.xlim))
+    if args.ylim is not None:
+        ylim = (-abs(args.ylim), abs(args.ylim))
+    ax.set_xlim(xlim)
+    ax.set_ylim(ylim)
 
     add_matplotlib_colorbar(fig, ax, sc, args, pad=0.04)
     return fig
@@ -677,7 +826,7 @@ def plot_state_3d(
         label="Hole",
         depthshade=False,
     )
-    ax.legend(loc="best")
+    ax.legend(loc="upper right")
 
     ax.set_xlabel(args.xlabel if args.xlabel is not None else r"$x$ (\AA)")
     ax.set_ylabel(args.ylabel if args.ylabel is not None else r"$y$ (\AA)")
@@ -847,6 +996,24 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["xy", "xz", "yz"],
         default="xy",
         help="Projection plane used only for --mode 2d. Default: xy.",
+    )
+    parser.add_argument(
+        "--projection",
+        choices=["bin", "exact"],
+        default="bin",
+        help="2D projection method. 'exact' preserves old exact-coordinate grouping. Default: bin.",
+    )
+    parser.add_argument(
+        "--projection-bin-size",
+        type=float,
+        default=None,
+        help="2D binned projection bin size in Angstrom. Default: infer from coordinate spacing.",
+    )
+    parser.add_argument(
+        "--projection-reducer",
+        choices=["sum", "max"],
+        default="sum",
+        help="Reducer for points inside each 2D projection bin. Default: sum.",
     )
 
     parser.add_argument(
@@ -1042,6 +1209,8 @@ def validate_args(args: argparse.Namespace) -> Optional[str]:
         return "--cbar-ticks must be at least 2."
     if args.max_points is not None and args.max_points <= 0:
         return "--max-points must be positive."
+    if args.projection_bin_size is not None and args.projection_bin_size <= 0.0:
+        return "--projection-bin-size must be positive."
     if args.backend == "plotly" and args.mode != "3d":
         return "--backend plotly requires --mode 3d."
     if args.backend == "plotly" and args.format != "html":
@@ -1126,11 +1295,29 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("Use either --degeneracies or --sum-degenerate, not both.", file=sys.stderr)
         return 2
 
+    # Load eigenvalues early if requested so both manual and auto modes can use them
+    selected_eigvals = None
+    if args.eigvals is not None:
+        eigvals_all = read_eigenvalues(args.eigvals, max(raw_indices) + 1)
+        selected_eigvals = eigvals_all[raw_indices]
+
     if args.degeneracies is not None:
         degeneracies = parse_degeneracies(args.degeneracies)
-        plot_states = combine_with_manual_degeneracies(plot_states, degeneracies)
+        # Pass the eigenvalues here so they get printed on the manually combined titles!
+        plot_states = combine_with_manual_degeneracies(plot_states, degeneracies, eigvals=selected_eigvals)
+
+    elif selected_eigvals is not None:
+        if args.sum_degenerate:
+            plot_states = combine_with_eigenvalue_threshold(
+                plot_states,
+                selected_eigvals,
+                threshold=args.deg_thresh,
+            )
+        else:
+            plot_states = attach_eigenvalue_titles(plot_states, selected_eigvals)
 
     if args.eigvals is not None:
+        # Match kwf.py's logic: read up to the max index requested from selection array
         eigvals_all = read_eigenvalues(args.eigvals, max(raw_indices) + 1)
         selected_eigvals = eigvals_all[raw_indices]
         if args.sum_degenerate:
