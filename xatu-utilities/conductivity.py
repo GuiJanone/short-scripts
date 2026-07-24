@@ -1,305 +1,514 @@
 #!/usr/bin/env python3
-import sys
+import argparse
 import json
+import sys
+
 import numpy as np
 import matplotlib.pyplot as plt
 
-def configure_matplotlib(fontsize=15, markersize=110, use_latex=True):
+
+COMPONENTS = ["xx", "xy", "xz", "yx", "yy", "yz", "zx", "zy", "zz"]
+DEFAULT_COMPONENTS = ["xx", "yy", "zz"]
+COMPONENT_COLORS = {
+    "xx": "tab:red",
+    "xy": "tab:purple",
+    "xz": "tab:brown",
+    "yx": "tab:pink",
+    "yy": "tab:blue",
+    "yz": "tab:cyan",
+    "zx": "tab:gray",
+    "zy": "tab:olive",
+    "zz": "tab:green",
+}
+OSC_COMPONENTS = {
+    "xx": ("x", 0),
+    "yy": ("y", 1),
+    "zz": ("z", 2),
+}
+
+
+def configure_matplotlib(fontsize=15, use_latex=True):
     """Set global matplotlib rcParams."""
+    plt.rcParams.update({
+        "text.usetex": bool(use_latex),
+        "axes.labelsize": fontsize,
+        "axes.titlesize": fontsize,
+        "xtick.labelsize": fontsize,
+        "ytick.labelsize": fontsize,
+        "legend.fontsize": fontsize,
+        "font.size": fontsize,
+    })
     if use_latex:
-        plt.rcParams.update({
-            "text.usetex": True,
-            "font.family": "serif"
-        })
-    plt.rcParams["axes.labelsize"]   = fontsize
-    plt.rcParams["axes.titlesize"]   = fontsize
-    plt.rcParams["xtick.labelsize"]  = fontsize
-    plt.rcParams["ytick.labelsize"]  = fontsize
-    plt.rcParams["legend.fontsize"]  = fontsize
-    plt.rcParams["font.size"]        = fontsize
+        plt.rcParams["font.family"] = "serif"
 
 
 def read_tensor_file(path):
     """
     Read a conductivity/tensor file where each row contains
-    omega xx xy xz yx yy yz zx zy zz
-    Returns a tuple ``(energy, data_dict)`` where ``data_dict``
-    maps component names (e.g. 'xx','xy',...) to numpy arrays.
+    omega xx xy xz yx yy yz zx zy zz.
     """
-    energy = []
-    comps = {k: [] for k in ["xx", "xy", "xz", "yx", "yy", "yz", "zx", "zy", "zz"]}
+    data = np.loadtxt(path)
+    if data.ndim == 1:
+        data = data.reshape(1, -1)
+    if data.shape[1] < len(COMPONENTS) + 1:
+        raise ValueError(
+            f"{path} has {data.shape[1]} columns; expected at least "
+            f"{len(COMPONENTS) + 1} columns: omega {' '.join(COMPONENTS)}"
+        )
 
-    with open(path, 'r') as f:
-        for raw in f:
-            parts = raw.split()
-            if not parts:
-                continue
-            vals = [float(v) for v in parts]
-            energy.append(vals[0])
-            comps["xx"].append(vals[1])
-            comps["xy"].append(vals[2])
-            comps["xz"].append(vals[3])
-            comps["yx"].append(vals[4])
-            comps["yy"].append(vals[5])
-            comps["yz"].append(vals[6])
-            comps["zx"].append(vals[7])
-            comps["zy"].append(vals[8])
-            comps["zz"].append(vals[9])
+    energy = data[:, 0]
+    comps = {comp: data[:, idx + 1] for idx, comp in enumerate(COMPONENTS)}
+    return energy, comps
 
-    return np.array(energy), {k: np.array(v) for k, v in comps.items()}
-
-
-# keep the old helper names for backward compatibility,
-# they simply pull out the xx/yy/zz entries from the full tensor.
 
 def read_exciton_file(path):
-    """
-    Read exciton file: energy and BSE conductivities only.
-    Returns:
-      energy, sigma_xx, sigma_yy, sigma_zz
-    """
+    """Backward-compatible helper returning only diagonal components."""
     energy, data = read_tensor_file(path)
     return energy, data["xx"], data["yy"], data["zz"]
 
 
 def read_sp_file(path):
-    """
-    Read single-particle conductivity file.
-    Returns:
-      sigma_sp_xx, sigma_sp_yy, sigma_sp_zz
-    """
+    """Backward-compatible helper returning only diagonal components."""
     _, data = read_tensor_file(path)
     return data["xx"], data["yy"], data["zz"]
 
 
 def read_oscillator_file(path):
     """
-    Read oscillator strengths from third file.
-    Returns:
-      E_exc, Vx, Vy, Vz
+    Read oscillator strengths.
+
+    Expected columns:
+      E_exc Re(Vx) Im(Vx) Re(Vy) Im(Vy) Re(Vz) Im(Vz)
     """
-    E_exc = []
-    Vx = []
-    Vy = []
-    Vz = []
-    with open(path, 'r') as f:
-        for raw in f:
-            parts = raw.split()
-            if not parts:
-                continue
-            vals = [float(v) for v in parts]
-            E_exc.append(vals[0])
-            Vx.append(abs(vals[1] + 1j*vals[2])**2)
-            Vy.append(abs(vals[3] + 1j*vals[4])**2)
-            Vz.append(abs(vals[5] + 1j*vals[6])**2)
-    return np.array(E_exc), np.array(Vx), np.array(Vy), np.array(Vz)
+    data = np.loadtxt(path)
+    if data.ndim == 1:
+        data = data.reshape(1, -1)
+    if data.shape[1] < 7:
+        raise ValueError(
+            f"{path} has {data.shape[1]} columns; expected at least 7 columns"
+        )
+
+    energy = data[:, 0]
+    strengths = {
+        "xx": np.abs(data[:, 1] + 1j * data[:, 2]) ** 2,
+        "yy": np.abs(data[:, 3] + 1j * data[:, 4]) ** 2,
+        "zz": np.abs(data[:, 5] + 1j * data[:, 6]) ** 2,
+    }
+    return energy, strengths
 
 
-def print_header(plot_type, output_file):
-    """Print a standardized header with current plot info.
+def parse_components(value):
+    if value is None:
+        return list(DEFAULT_COMPONENTS)
 
-    ``plot_type`` is an arbitrary string describing the mode ("json",
-    "1", "2", etc.).
-    """
+    components = [item.strip().lower() for item in value.split(",") if item.strip()]
+    if not components:
+        raise argparse.ArgumentTypeError("component list cannot be empty")
+
+    bad = [comp for comp in components if comp not in COMPONENTS]
+    if bad:
+        raise argparse.ArgumentTypeError(
+            f"unknown component(s): {', '.join(bad)}. Allowed: {', '.join(COMPONENTS)}"
+        )
+    return components
+
+
+def parse_limits(values, parser, option):
+    if values is None:
+        return None
+    lo, hi = values
+    if lo >= hi:
+        parser.error(f"{option} limits must be in increasing order")
+    return (lo, hi)
+
+
+def print_header(mode, output_file, components):
     print("===================================")
     print("       PLOTTING CONDUCTIVITY       ")
     print("===================================")
-    print(f"Mode: {plot_type}")
+    print(f"Mode: {mode}")
+    print(f"Components: {', '.join(components)}")
     print(f"Output file: {output_file}")
     print()
 
 
-def print_usage():
-    print("Usage:")
-    print("  script.py <exciton_file> <sp_file> [oscillator_file]")
-    print("  script.py <config.json>               # use JSON configuration")
-    print("  script.py --example                   # write example.json and exit")
-    print()
-    print("Running with two files does plot type 1.")
-    print("Add a third file to get plot type 2.")
-    print("JSON input allows arbitrary datasets, tensor components, axis")
-    print("limits and offsets. See generated example.json for format.")
+def default_xlim(datasets, oscillator):
+    ranges = []
+    for dataset in datasets:
+        if dataset is not None:
+            energy = dataset["energy"]
+            ranges.append((float(np.min(energy)), float(np.max(energy))))
+    if oscillator is not None:
+        energy = oscillator["energy"]
+        ranges.append((float(np.min(energy)), float(np.max(energy))))
+    if not ranges:
+        return None
+    return (min(item[0] for item in ranges), max(item[1] for item in ranges))
 
 
-def plot_type1(energy, sigma_xx, sigma_yy, sigma_zz,
-               sigma_sp_xx, sigma_sp_yy, sigma_sp_zz,
-               output="conductivity.png"):
-    fig, ax = plt.subplots(figsize=(6.4, 4.8))
-    ax.plot(energy, sigma_xx,    "r-",  label="BSE_xx", alpha=0.6)
-    ax.plot(energy, sigma_yy,    "orange", label="BSE_yy", alpha=0.6)
-    ax.plot(energy, sigma_zz,    "g-",  label="BSE_zz", alpha=0.6)
-    ax.plot(energy, sigma_sp_xx, "b--", label="IPA_xx")
-    ax.plot(energy, sigma_sp_yy, "c--", label="IPA_yy")
-    ax.plot(energy, sigma_sp_zz, ls="--", c="navy", label="IPA_zz")
+def plot_conductivity(
+    exciton=None,
+    ipa=None,
+    oscillator=None,
+    components=None,
+    output="conductivity.png",
+    xlim=None,
+    ylim=None,
+    osc_ylim=None,
+    figsize=(6.4, 4.8),
+    dpi=600,
+    title=None,
+    xlabel="E (eV)",
+    ylabel=r"$\sigma$ ($e^2/\hbar$)",
+    osc_threshold=0.1,
+    osc_width=0.03,
+    show=False,
+):
+    components = components or list(DEFAULT_COMPONENTS)
+    datasets = [item for item in (exciton, ipa) if item is not None]
+    if not datasets and oscillator is None:
+        raise ValueError("nothing to plot: provide at least one of --ex, --ipa, or --osc")
 
-    ax.set_xlabel("E (eV)", fontsize=18)
-    ax.set_ylabel(r"$\sigma$ ($e^2/\hbar$)", fontsize=18)
-    ax.legend()
-    ax.set_xlim(energy[0], energy[-1])
-    plt.tight_layout()
-    plt.savefig(output, dpi=600)
+    if oscillator is None:
+        fig, axes = plt.subplots(figsize=figsize)
+        ax_sigma = axes
+        ax_osc = None
+    else:
+        fig, axes = plt.subplots(
+            2,
+            1,
+            figsize=figsize,
+            sharex=True,
+            gridspec_kw={"height_ratios": [3, 1]},
+        )
+        ax_sigma, ax_osc = axes
 
+    has_both_sigma = exciton is not None and ipa is not None
+    for dataset in (exciton, ipa):
+        if dataset is None:
+            continue
+        linestyle = "--" if dataset["kind"] == "IPA" and has_both_sigma else "-"
+        alpha = 0.95 if dataset["kind"] == "IPA" else 0.8
+        for comp in components:
+            ax_sigma.plot(
+                dataset["energy"],
+                dataset["data"][comp],
+                color=COMPONENT_COLORS[comp],
+                linestyle=linestyle,
+                linewidth=2.0,
+                alpha=alpha,
+                label=f"{dataset['label']}$_{{ {comp} }}$",
+            )
 
-def plot_type2(energy, sigma_xx, sigma_yy, sigma_zz,
-               sigma_sp_xx, sigma_sp_yy, sigma_sp_zz,
-               E_exc, Vx, Vy, Vz,
-               output="conductivity_oscillators.png"):
-    fig, axes = plt.subplots(2, 1, figsize=(6.4, 4.8))
-    ax1 = axes[0]
-    ax1.plot(energy, sigma_xx,    "r-",     label="BSE_xx")
-    ax1.plot(energy, sigma_yy,    "orange", label="BSE_yy")
-    ax1.plot(energy, sigma_zz,    "g-",     label="BSE_zz")
-    ax1.plot(energy, sigma_sp_xx, "b--",    label="IPA_xx")
-    ax1.plot(energy, sigma_sp_yy, "c--",    label="IPA_yy")
-    ax1.plot(energy, sigma_sp_zz, ls="--",  c="navy", label="IPA_zz")
-    ax1.set_ylabel(r"$\sigma$ ($e^2/\hbar$)", fontsize=18)
+    if ax_osc is not None:
+        plotted = False
+        for comp in components:
+            if comp not in OSC_COMPONENTS:
+                continue
+            axis_label, _ = OSC_COMPONENTS[comp]
+            strength = oscillator["strengths"][comp]
+            values = oscillator["energy"] * strength
+            mask = strength > osc_threshold
+            if not np.any(mask):
+                continue
+            plotted = True
+            ax_osc.bar(
+                oscillator["energy"][mask],
+                values[mask],
+                width=osc_width,
+                color=COMPONENT_COLORS[comp],
+                alpha=0.35,
+                label=f"V{axis_label}",
+            )
 
-    ax2 = axes[1]
+        ax_osc.set_ylabel(r"$E|V^\alpha|^2$")
+        ax_osc.set_xlabel(xlabel)
+        if osc_ylim is not None:
+            ax_osc.set_ylim(osc_ylim)
+        if plotted:
+            ax_osc.legend()
 
-    # mask weak oscilaltors (plotting everything is costly and messy)
-    mask_vx = Vx > 0.1
-    mask_vy = Vy > 0.1
-    mask_vz = Vz > 0.5
+    ax_sigma.set_ylabel(ylabel)
+    if ax_osc is None:
+        ax_sigma.set_xlabel(xlabel)
+    if title:
+        ax_sigma.set_title(title)
+    if ylim is not None:
+        ax_sigma.set_ylim(ylim)
 
-    if mask_vx.any():
-        ax2.bar(E_exc[mask_vx], E_exc[mask_vx]*Vx[mask_vx], width=0.03, alpha=0.3, label="xx")
-    if mask_vy.any():
-        ax2.bar(E_exc[mask_vy], E_exc[mask_vy]*Vy[mask_vy], width=0.03, alpha=0.3, label="yy")
-    if mask_vz.any():
-        ax2.bar(E_exc[mask_vz], E_exc[mask_vz]*Vz[mask_vz], width=0.03, alpha=0.3, label="zz")
+    resolved_xlim = xlim if xlim is not None else default_xlim(datasets, oscillator)
+    if resolved_xlim is not None:
+        ax_sigma.set_xlim(resolved_xlim)
+        if ax_osc is not None:
+            ax_osc.set_xlim(resolved_xlim)
 
-    ax2.set_ylabel(r"$|V^\alpha|^2$", fontsize=18)
-    ax2.set_xlabel("E (eV)", fontsize=18)
-
-    for ax in axes:
-        ax.set_xlim(energy[0], energy[-1])
-        ax.tick_params(labelsize=12)
-
-    ax1.legend()
-    ax2.legend()
-    plt.subplots_adjust(hspace=0.1)
-    plt.tight_layout()
-    plt.savefig(output, dpi=600)
+    if datasets:
+        ax_sigma.legend()
+    fig.tight_layout()
+    fig.savefig(output, dpi=dpi)
+    if show:
+        plt.show()
+    plt.close(fig)
+    return fig
 
 
 def plot_multi(energies, datas, labels, components,
                output="conductivity.png", xlim=None, ylim=None):
-    """Plot a collection of datasets and return the figure.
+    """Backward-compatible multi-dataset plot helper."""
+    datasets = [
+        {"energy": energy, "data": data, "label": label, "kind": label}
+        for energy, data, label in zip(energies, datas, labels)
+    ]
+    return _plot_arbitrary_datasets(datasets, components, output, xlim, ylim)
 
-    *energies* is a list of 1‑D numpy arrays (one per dataset).
-    *datas* is a list of dictionaries mapping tensor components to arrays.
-    *labels* provides a human‑readable name for each dataset.
-    *components* is the list of tensor components to draw (e.g. ['xx','xy']).
-    """
+
+def _plot_arbitrary_datasets(datasets, components, output, xlim, ylim):
     fig, ax = plt.subplots(figsize=(6.4, 4.8))
-    for energy, data, lab in zip(energies, datas, labels):
+    for dataset in datasets:
         for comp in components:
-            arr = data.get(comp)
-            if arr is None:
-                continue
-            ax.plot(energy, arr, label=f"{lab}_{comp}")
-    ax.set_xlabel("E (eV)", fontsize=18)
-    ax.set_ylabel(r"$\sigma$ ($e^2/\hbar$)", fontsize=18)
+            ax.plot(
+                dataset["energy"],
+                dataset["data"][comp],
+                color=COMPONENT_COLORS.get(comp),
+                label=f"{dataset['label']}_{comp}",
+            )
+    ax.set_xlabel("E (eV)")
+    ax.set_ylabel(r"$\sigma$ ($e^2/\hbar$)")
     if xlim is not None:
         ax.set_xlim(xlim)
     if ylim is not None:
         ax.set_ylim(ylim)
     ax.legend()
-    plt.tight_layout()
-    plt.savefig(output, dpi=600)
+    fig.tight_layout()
+    fig.savefig(output, dpi=600)
     return fig
 
 
 def generate_example_json(path="example.json"):
     """Write a skeleton configuration file to *path*."""
     example = {
-        "datasets": [
-            {"path": "exciton.dat", "label": "BSE", "offset": 0.0},
-            {"path": "sp.dat", "label": "IPA", "offset": 0.0}
-        ],
-        "components": ["xx", "yy"],
+        "ex": "excitonic.dat",
+        "ipa": "ipa.dat",
+        "osc": "oscillator.dat",
+        "components": ["xx", "yy", "zz"],
         "xlim": [0, 10],
         "ylim": [0, 5],
-        "output": "conductivity.png"
+        "output": "conductivity.png",
+        "show": False,
+        "oscillator_threshold": 0.1,
     }
-    with open(path, 'w') as f:
+    with open(path, "w") as f:
         json.dump(example, f, indent=2)
     print(f"Example JSON written to {path}")
 
 
 def run_from_json(config_path):
-    with open(config_path, 'r') as f:
+    with open(config_path, "r") as f:
         cfg = json.load(f)
 
-    datasets = cfg.get('datasets', [])
+    if "datasets" in cfg:
+        return run_legacy_json(cfg)
+
+    components = cfg.get("components", DEFAULT_COMPONENTS)
+    components = parse_components(",".join(components) if isinstance(components, list) else components)
+    output = cfg.get("output", "conductivity.png")
+    exciton = load_sigma_dataset(cfg.get("ex"), "BSE", "BSE", cfg.get("ex_offset", 0.0))
+    ipa = load_sigma_dataset(cfg.get("ipa"), "IPA", "IPA", cfg.get("ipa_offset", 0.0))
+    oscillator = load_oscillator_dataset(cfg.get("osc"))
+
+    print_header("json", output, components)
+    configure_matplotlib(
+        fontsize=int(cfg.get("font_size", 15)),
+        use_latex=not bool(cfg.get("no_latex", False)),
+    )
+    plot_conductivity(
+        exciton=exciton,
+        ipa=ipa,
+        oscillator=oscillator,
+        components=components,
+        output=output,
+        xlim=tuple(cfg["xlim"]) if cfg.get("xlim") is not None else None,
+        ylim=tuple(cfg["ylim"]) if cfg.get("ylim") is not None else None,
+        osc_ylim=tuple(cfg["osc_ylim"]) if cfg.get("osc_ylim") is not None else None,
+        figsize=tuple(cfg.get("figsize", [6.4, 4.8])),
+        dpi=int(cfg.get("dpi", 600)),
+        title=cfg.get("title"),
+        xlabel=cfg.get("xlabel", "E (eV)"),
+        ylabel=cfg.get("ylabel", r"$\sigma$ ($e^2/\hbar$)"),
+        osc_threshold=float(cfg.get("oscillator_threshold", 0.1)),
+        osc_width=float(cfg.get("oscillator_width", 0.03)),
+        show=bool(cfg.get("show", False)),
+    )
+
+
+def run_legacy_json(cfg):
+    datasets = cfg.get("datasets", [])
     if not datasets:
-        raise ValueError('configuration must contain a non‑empty "datasets" list')
-    components = cfg.get('components', [])
-    if not components:
-        raise ValueError('must specify at least one component in "components"')
-    xlim = cfg.get('xlim', None)
-    ylim = cfg.get('ylim', None)
-    output = cfg.get('output', 'conductivity.png')
+        raise ValueError('configuration must contain a non-empty "datasets" list')
+    components = cfg.get("components", DEFAULT_COMPONENTS)
+    components = parse_components(",".join(components) if isinstance(components, list) else components)
+    xlim = cfg.get("xlim", None)
+    ylim = cfg.get("ylim", None)
+    output = cfg.get("output", "conductivity.png")
 
     energies = []
     datas = []
     labels = []
     for ds in datasets:
-        path = ds['path']
-        lab = ds.get('label', path)
-        offset = ds.get('offset', 0.0)
-        energy, data = read_tensor_file(path)
-        energies.append(energy + offset)
+        energy, data = read_tensor_file(ds["path"])
+        energies.append(energy + float(ds.get("offset", 0.0)))
         datas.append(data)
-        labels.append(lab)
+        labels.append(ds.get("label", ds["path"]))
 
-    print_header('json', output)
+    print_header("legacy-json", output, components)
     configure_matplotlib()
     plot_multi(energies, datas, labels, components,
                output=output, xlim=xlim, ylim=ylim)
-    plt.show()
 
 
-def main():
-    # handle simple command-line flags first
-    if len(sys.argv) == 2 and sys.argv[1] in ('--example', '--generate-json'):
-        generate_example_json('example.json')
-        sys.exit(0)
+def load_sigma_dataset(path, label, kind, offset=0.0):
+    if path is None:
+        return None
+    energy, data = read_tensor_file(path)
+    return {
+        "energy": energy + float(offset),
+        "data": data,
+        "label": label,
+        "kind": kind,
+    }
 
-    # JSON configuration mode
-    if len(sys.argv) == 2 and sys.argv[1].lower().endswith('.json'):
-        run_from_json(sys.argv[1])
-        sys.exit(0)
 
-    # legacy behaviour for two or three files
-    if len(sys.argv) < 3:
-        print_usage()
-        sys.exit(1)
+def load_oscillator_dataset(path):
+    if path is None:
+        return None
+    energy, strengths = read_oscillator_file(path)
+    return {"energy": energy, "strengths": strengths}
 
-    exciton_path = sys.argv[1]
-    sp_path      = sys.argv[2]
-    has_osc      = len(sys.argv) == 4
-    plot_type    = 2 if has_osc else 1
-    output_file  = "conductivity_oscillators.png" if has_osc else "conductivity.png"
 
-    print_header(plot_type, output_file)
-    configure_matplotlib()
+def build_parser():
+    parser = argparse.ArgumentParser(
+        description="Plot excitonic, IPA, and oscillator conductivity data."
+    )
+    parser.add_argument(
+        "legacy_files",
+        nargs="*",
+        help="Legacy positional mode: <excitonic_file> <ipa_file> [oscillator_file].",
+    )
+    parser.add_argument("--ex", help="Excitonic/BSE conductivity tensor file.")
+    parser.add_argument("--ipa", help="Independent-particle conductivity tensor file.")
+    parser.add_argument("--osc", help="Oscillator-strength file.")
+    parser.add_argument(
+        "--ij",
+        type=parse_components,
+        default=list(DEFAULT_COMPONENTS),
+        help="Comma-separated tensor components to plot. Default: xx,yy,zz.",
+    )
+    parser.add_argument("--config", help="JSON configuration file.")
+    parser.add_argument("--example", "--generate-json", nargs="?", const="example.json",
+                        help="Write an example JSON config and exit.")
 
-    energy, sigma_xx, sigma_yy, sigma_zz = read_exciton_file(exciton_path)
-    sigma_sp_xx, sigma_sp_yy, sigma_sp_zz = read_sp_file(sp_path)
+    parser.add_argument("-o", "--out", default=None, help="Output image path.")
+    parser.add_argument("--xlim", nargs=2, type=float, metavar=("MIN", "MAX"),
+                        help="Energy-axis limits.")
+    parser.add_argument("--ylim", nargs=2, type=float, metavar=("MIN", "MAX"),
+                        help="Conductivity-axis limits.")
+    parser.add_argument("--osc-ylim", nargs=2, type=float, metavar=("MIN", "MAX"),
+                        help="Oscillator subplot y limits.")
+    parser.add_argument("--title", default=None, help="Optional plot title.")
+    parser.add_argument("--xlabel", default="E (eV)", help="X-axis label.")
+    parser.add_argument("--ylabel", default=r"$\sigma$ ($e^2/\hbar$)",
+                        help="Conductivity-axis label.")
+    parser.add_argument("--figsize", nargs=2, type=float, default=(6.4, 4.8),
+                        metavar=("W", "H"), help="Figure size in inches.")
+    parser.add_argument("--dpi", type=int, default=600, help="Output DPI.")
+    parser.add_argument("--font-size", type=int, default=15, help="Base font size.")
+    parser.add_argument("--no-latex", action="store_true", help="Disable LaTeX text rendering.")
+    parser.add_argument("--show", action="store_true", help="Show the plot interactively after saving.")
+    parser.add_argument("--osc-threshold", type=float, default=0.1,
+                        help="Minimum oscillator strength to draw. Default: 0.1.")
+    parser.add_argument("--osc-width", type=float, default=0.03,
+                        help="Oscillator bar width in eV. Default: 0.03.")
+    return parser
 
-    if plot_type == 1:
-        plot_type1(energy, sigma_xx, sigma_yy, sigma_zz,
-                   sigma_sp_xx, sigma_sp_yy, sigma_sp_zz,
-                   output_file)
-    else:
-        E_exc, Vx, Vy, Vz = read_oscillator_file(sys.argv[3])
-        plot_type2(energy, sigma_xx, sigma_yy, sigma_zz,
-                   sigma_sp_xx, sigma_sp_yy, sigma_sp_zz,
-                   E_exc, Vx, Vy, Vz,
-                   output_file)
 
-    plt.show()
+def resolve_args(args, parser):
+    if args.example:
+        generate_example_json(args.example)
+        return None
+
+    if args.config is None and len(args.legacy_files) == 1 and args.legacy_files[0].lower().endswith(".json"):
+        args.config = args.legacy_files[0]
+        args.legacy_files = []
+
+    if args.config:
+        if args.legacy_files or args.ex or args.ipa or args.osc:
+            parser.error("--config cannot be combined with data files")
+        run_from_json(args.config)
+        return None
+
+    if args.legacy_files:
+        if args.ex or args.ipa or args.osc:
+            parser.error("do not combine legacy positional files with --ex/--ipa/--osc")
+        if len(args.legacy_files) not in (2, 3):
+            parser.error("legacy positional mode expects <excitonic_file> <ipa_file> [oscillator_file]")
+        args.ex = args.legacy_files[0]
+        args.ipa = args.legacy_files[1]
+        if len(args.legacy_files) == 3:
+            args.osc = args.legacy_files[2]
+
+    if not (args.ex or args.ipa or args.osc):
+        parser.error("provide at least one of --ex, --ipa, --osc, or a JSON config")
+
+    args.xlim = parse_limits(args.xlim, parser, "--xlim")
+    args.ylim = parse_limits(args.ylim, parser, "--ylim")
+    args.osc_ylim = parse_limits(args.osc_ylim, parser, "--osc-ylim")
+    return args
+
+
+def main(argv=None):
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    args = resolve_args(args, parser)
+    if args is None:
+        return 0
+
+    output = args.out
+    if output is None:
+        output = "conductivity_oscillators.png" if args.osc else "conductivity.png"
+
+    configure_matplotlib(fontsize=args.font_size, use_latex=not args.no_latex)
+    exciton = load_sigma_dataset(args.ex, "BSE", "BSE")
+    ipa = load_sigma_dataset(args.ipa, "IPA", "IPA")
+    oscillator = load_oscillator_dataset(args.osc)
+
+    mode = "+".join(
+        label for label, present in (
+            ("BSE", exciton is not None),
+            ("IPA", ipa is not None),
+            ("osc", oscillator is not None),
+        ) if present
+    )
+    print_header(mode, output, args.ij)
+    plot_conductivity(
+        exciton=exciton,
+        ipa=ipa,
+        oscillator=oscillator,
+        components=args.ij,
+        output=output,
+        xlim=args.xlim,
+        ylim=args.ylim,
+        osc_ylim=args.osc_ylim,
+        figsize=tuple(args.figsize),
+        dpi=args.dpi,
+        title=args.title,
+        xlabel=args.xlabel,
+        ylabel=args.ylabel,
+        osc_threshold=args.osc_threshold,
+        osc_width=args.osc_width,
+        show=args.show,
+    )
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
