@@ -59,10 +59,17 @@ def collect_data(base_dir, filename):
         else:
             qx, qy = 0.0, q
 
-        filepath = folder / filename
-        if not filepath.exists():
-            print(f"Skipping missing file: {filepath}")
-            continue
+        if filename is None:
+            matches = sorted(folder.glob("*invepsilon.dat"))
+            if len(matches) != 1:
+                print(f"Skipping {folder}: expected one *invepsilon.dat, found {len(matches)}. Use --filename.")
+                continue
+            filepath = matches[0]
+        else:
+            filepath = folder / filename
+            if not filepath.exists():
+                print(f"Skipping missing file: {filepath}")
+                continue
 
         q_abs = np.sqrt(qx * qx + qy * qy)
         eps_inv_00 = read_eps_inv_00(filepath)
@@ -168,6 +175,17 @@ def plot_directional_results(data, fit_results, output_prefix, include_fit=True)
                 alpha=0.7,
             )
 
+            fit = fit_results.get(direction) if include_fit and fit_results else None
+            if part_name == "real" and fit is not None:
+                q_line = np.linspace(0.0, fit["q_fit"].max(), 50)
+                plt.plot(
+                    q_line,
+                    fit["eps0"] + fit["r0"] * q_line,
+                    color=color,
+                    linestyle="--",
+                    label=fr"fit ${direction}$: $r_0$ = {fit['r0']:.3g}",
+                )
+
         plt.xlabel(r"$|q|$")
         plt.ylabel(ylabel)
         plt.legend()
@@ -223,13 +241,13 @@ def main():
     parser.add_argument(
         "--base-dir",
         default="results-Q-inverse",
-        help="Directory containing Output_screening_qx_*_qy_* folders.",
+        help="Directory containing Output_screening_q{x,y}_<q> folders.",
     )
 
     parser.add_argument(
         "--filename",
-        default="GaAs_invpesilon.dat",
-        help="Dielectric matrix filename inside each q folder.",
+        default=None,
+        help="Inverse dielectric matrix filename inside each q folder. Default: the single *invepsilon.dat found there.",
     )
 
     parser.add_argument(
@@ -252,6 +270,12 @@ def main():
     )
 
     parser.add_argument(
+        "--macro-output",
+        default="macro_screening.dat",
+        help="Output file for epsilon_M(q) per direction.",
+    )
+
+    parser.add_argument(
         "--plot-prefix",
         default="screening",
         help="Prefix for output plot files.",
@@ -271,7 +295,7 @@ def main():
         ),
     )
 
-    macro_screening_output = "macro_screening.dat"
+    macro_screening_output = args.macro_output
     write_macro_screening(data, macro_screening_output)
 
     fit_results = None

@@ -37,6 +37,8 @@ import numpy as np
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.ticker import MaxNLocator
 
+from xatu_common import configure_matplotlib, parse_selection, read_eigenvalues
+
 
 @dataclass
 class RealSpaceData:
@@ -50,24 +52,6 @@ class PlotState:
     prob: np.ndarray
     title: str
     raw_indices: List[int]
-
-
-# ------------------------- Matplotlib setup -------------------------
-
-
-def configure_matplotlib(fontsize: int = 15, latex: bool = True) -> None:
-    """Set global matplotlib options."""
-    if latex:
-        plt.rcParams.update({"text.usetex": True, "font.family": "serif"})
-    else:
-        plt.rcParams.update({"text.usetex": False})
-
-    plt.rcParams["axes.labelsize"] = fontsize
-    plt.rcParams["axes.titlesize"] = fontsize
-    plt.rcParams["xtick.labelsize"] = fontsize
-    plt.rcParams["ytick.labelsize"] = fontsize
-    plt.rcParams["legend.fontsize"] = fontsize
-    plt.rcParams["font.size"] = fontsize
 
 
 # ------------------------- IO and parsing -------------------------
@@ -185,49 +169,7 @@ def read_rswf_file(path: str, hole_row: bool = True) -> RealSpaceData:
     )
 
 
-def read_eigenvalues(path: str, n: int) -> np.ndarray:
-    """Read eigenvalues file: skip first three lines, then read n numeric values."""
-    values: List[float] = []
-    with open(path, "r", encoding="utf-8") as handle:
-        for _ in range(3):
-            next(handle, None)
-        for line in handle:
-            stripped = line.strip()
-            if not stripped:
-                continue
-            try:
-                values.append(float(stripped.split()[0]))
-            except ValueError:
-                continue
-            if len(values) == n:
-                break
-
-    if len(values) < n:
-        raise ValueError(f"Expected {n} eigenvalues but found {len(values)} in {path}")
-    return np.array(values, dtype=float)
-
-
 # ------------------------- State selection and combining -------------------------
-
-
-def parse_selection(select_str: str, max_n: int) -> List[int]:
-    """Parse a 1-based selection string like '1,2,5-7'."""
-    selected: List[int] = []
-    for item in select_str.split(","):
-        item = item.strip()
-        if not item:
-            continue
-        if "-" in item:
-            start_text, end_text = item.split("-", 1)
-            start = int(start_text)
-            end = int(end_text)
-            if end < start:
-                start, end = end, start
-            selected.extend(range(start, end + 1))
-        else:
-            selected.append(int(item))
-
-    return sorted({idx - 1 for idx in selected if 1 <= idx <= max_n})
 
 
 def parse_degeneracies(text: str) -> List[int]:
@@ -483,14 +425,15 @@ def project_density_to_plane(
     raise ValueError(f"Unknown projection mode: {projection}")
 
 
+def axis_label(axis: str) -> str:
+    """Axis label in Angstrom, written for LaTeX or mathtext as configured."""
+    angstrom = r"\AA" if plt.rcParams["text.usetex"] else "Å"
+    return rf"${axis}$ ({angstrom})"
+
+
 def plane_labels(plane: str) -> Tuple[str, str]:
     """Return axis labels for a projection plane."""
-    labels = {
-        "x": r"$x$ (\AA)",
-        "y": r"$y$ (\AA)",
-        "z": r"$z$ (\AA)",
-    }
-    return labels[plane[0]], labels[plane[1]]
+    return axis_label(plane[0]), axis_label(plane[1])
 
 
 def latex_escape(text: str) -> str:
@@ -828,9 +771,9 @@ def plot_state_3d(
     )
     ax.legend(loc="upper right")
 
-    ax.set_xlabel(args.xlabel if args.xlabel is not None else r"$x$ (\AA)")
-    ax.set_ylabel(args.ylabel if args.ylabel is not None else r"$y$ (\AA)")
-    ax.set_zlabel(args.zlabel if args.zlabel is not None else r"$z$ (\AA)")
+    ax.set_xlabel(args.xlabel if args.xlabel is not None else axis_label("x"))
+    ax.set_ylabel(args.ylabel if args.ylabel is not None else axis_label("y"))
+    ax.set_zlabel(args.zlabel if args.zlabel is not None else axis_label("z"))
     ax.set_title(latex_escape(plot_state.title))
 
     xlim = axis_limits(x, args.xlim)
@@ -1158,7 +1101,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Output base path. Default: input basename + '_rswf'.",
     )
-    parser.add_argument("--dpi", type=int, default=600, help="PNG DPI. Default: 600.")
+    parser.add_argument("--dpi", type=int, default=150, help="PNG DPI. Default: 150.")
 
     parser.add_argument("--font-size", type=int, default=15, help="Base font size.")
     parser.add_argument("--no-latex", action="store_true", help="Disable LaTeX rendering.")
@@ -1314,19 +1257,6 @@ def main(argv: Optional[List[str]] = None) -> int:
                 threshold=args.deg_thresh,
             )
         else:
-            plot_states = attach_eigenvalue_titles(plot_states, selected_eigvals)
-
-    if args.eigvals is not None:
-        # Match kwf.py's logic: read up to the max index requested from selection array
-        eigvals_all = read_eigenvalues(args.eigvals, max(raw_indices) + 1)
-        selected_eigvals = eigvals_all[raw_indices]
-        if args.sum_degenerate:
-            plot_states = combine_with_eigenvalue_threshold(
-                plot_states,
-                selected_eigvals,
-                threshold=args.deg_thresh,
-            )
-        elif args.degeneracies is None:
             plot_states = attach_eigenvalue_titles(plot_states, selected_eigvals)
 
     coords, hole_position = centered_coordinates(

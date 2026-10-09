@@ -1,45 +1,26 @@
 #!/usr/bin/env python3
 """
-kwf_plot.py - Plot excitonic wavefunctions from a KWF file.
-
-Changes in this version:
-- Square plots by default (both figure shape and data extent).
-- New flag --no-square to disable squaring (keeps backward compatibility).
-- Use constrained_layout to avoid colorbar/labels distorting aspect.
-- For tri interpolation, NaNs are masked to avoid artifacts.
+kwf.py - Plot excitonic wavefunctions |A(k)|^2 from a XATU .kwf file.
 
 Example usage:
-  python kwf_plot.py data.kwf -n 6
-  python kwf_plot.py data.kwf -n 10 --eigvals EIG.dat --deg-thresh 1e-3
-  python kwf_plot.py data.kwf --select 1-4,7 --format png --out figs/run1 --interp gouraud --font-size 16 --no-latex
-  python kwf_plot.py data.kwf -n 8 --interp tri --grid 300 --cmap plasma
+  python kwf.py MoS2.kwf -n 6
+  python kwf.py MoS2.kwf -n 10 --eigvals MoS2.eigval --deg-thresh 1e-3
+  python kwf.py MoS2.kwf --select 1-4,7 --format png --out figs/run1 --interp gouraud
+  python kwf.py MoS2.kwf -n 8 --interp tri --grid 300 --cmap plasma
 """
 from __future__ import annotations
 import sys
 import os
 import argparse
 import numpy as np
-import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.tri import Triangulation, LinearTriInterpolator
 from typing import List, Tuple, Optional
 
+from xatu_common import configure_matplotlib, parse_selection, read_eigenvalues
+
 # ------------ IO & parsing ------------
-
-def configure_matplotlib(fontsize: int = 15, latex: bool = True) -> None:
-    """Set global matplotlib rcParams."""
-    if latex:
-        plt.rcParams.update({"text.usetex": True, "font.family": "serif"})
-    else:
-        plt.rcParams.update({"text.usetex": False})
-    plt.rcParams["axes.labelsize"]  = fontsize
-    plt.rcParams["axes.titlesize"]  = fontsize
-    plt.rcParams["xtick.labelsize"] = fontsize
-    plt.rcParams["ytick.labelsize"] = fontsize
-    plt.rcParams["legend.fontsize"]= fontsize
-    plt.rcParams["font.size"]       = fontsize
-
 
 def read_kwf_file(path: str) -> Tuple[np.ndarray, List[np.ndarray]]:
     """
@@ -84,73 +65,31 @@ def read_kwf_file(path: str) -> Tuple[np.ndarray, List[np.ndarray]]:
     return kpoints_arr, states
 
 
-def read_eigenvalues(path: str, n: int) -> np.ndarray:
-    """Read eigenvalues file: skip first three lines, then read n numeric values."""
-    vals: List[float] = []
-    with open(path, 'r') as f:
-        for _ in range(3):
-            next(f, None)
-        while len(vals) < n:
-            line = next(f, None)
-            if line is None:
-                break
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                vals.append(float(line))
-            except ValueError:
-                continue
-    if len(vals) < n:
-        raise ValueError(f"Expected {n} eigenvalues but got {len(vals)} in {path}")
-    return np.array(vals, dtype=float)
-
-
 # ------------ Processing ------------
 
 def combine_degenerate_states(
     eigvals: np.ndarray,
     states: List[np.ndarray],
+    indices: List[int],
     threshold: float
 ) -> Tuple[List[np.ndarray], List[str]]:
     """
-    Combine (pairs of) wavefunctions whose eigenvalues are within 'threshold'.
-    Titles include energies. Keeps order, merges i and i+1 when degenerate.
+    Sum the |A|^2 of consecutive states whose eigenvalues are within 'threshold'.
+    'indices' are the 0-based state numbers; titles include energies.
     """
     combined_states: List[np.ndarray] = []
     titles: List[str] = []
     i = 0
     while i < len(eigvals):
-        if i + 1 < len(eigvals) and abs(eigvals[i] - eigvals[i + 1]) <= threshold:
-            wf = states[i] + states[i + 1]
-            combined_states.append(wf)
-            titles.append(rf"Exciton $\\psi$ \#{i+1}+{i+2}  E={eigvals[i]:.6f}, {eigvals[i+1]:.6f}")
-            i += 2
-        else:
-            combined_states.append(states[i])
-            titles.append(rf"Exciton $\\psi$ \#{i+1}  E={eigvals[i]:.6f}")
-            i += 1
+        j = i + 1
+        while j < len(eigvals) and abs(eigvals[j] - eigvals[j - 1]) <= threshold:
+            j += 1
+        combined_states.append(np.sum(states[i:j], axis=0))
+        label = "+".join(str(indices[k] + 1) for k in range(i, j))
+        energies = ", ".join(f"{eigvals[k]:.6f}" for k in range(i, j))
+        titles.append(rf"Exciton $\psi_{{{label}}}$  E={energies}")
+        i = j
     return combined_states, titles
-
-
-def parse_selection(select_str: str, max_n: int) -> List[int]:
-    """
-    Parse selection like '1,2,5-7' into 0-based indices. Clips to [0, max_n).
-    """
-    out: List[int] = []
-    parts = [p.strip() for p in select_str.split(',') if p.strip()]
-    for p in parts:
-        if '-' in p:
-            a, b = p.split('-', 1)
-            start = max(1, int(a))
-            end   = int(b)
-            if end < start:
-                start, end = end, start
-            out.extend(list(range(start, end + 1)))
-        else:
-            out.append(int(p))
-    idxs = sorted({i-1 for i in out if 1 <= i <= max_n})
-    return idxs
 
 
 # ------------ Plotting ------------
@@ -161,8 +100,8 @@ def regular_grid_from_bounds(xmin, xmax, ymin, ymax, n: int) -> Tuple[np.ndarray
     return np.meshgrid(xs, ys)
 
 
-def make_titles(n: int) -> List[str]:
-    return [rf"Exciton $\\psi$ \#{i+1}" for i in range(n)]
+def make_titles(indices: List[int]) -> List[str]:
+    return [rf"Exciton $\psi_{{{i+1}}}$" for i in indices]
 
 
 def plot_state_tripcolor(ax, kx, ky, wf, shading: str, cmap: str):
@@ -213,7 +152,7 @@ def save_pngs(figs: List[plt.Figure], prefix: str, dpi: int) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="kwf_plot.py",
+        prog="kwf.py",
         description="Plot excitonic wavefunctions (KWF) to PDF or PNG with optional interpolation and eigenvalue-aware titles."
     )
     p.add_argument("kwf_file", help="KWF file containing exciton wavefunctions.")
@@ -221,9 +160,9 @@ def build_parser() -> argparse.ArgumentParser:
     sel.add_argument("-n", "--n-states", type=int, help="Number of states to plot (from the beginning).")
     sel.add_argument("--select", type=str, help="Explicit state list/ranges (1-based), e.g. '1,2,5-7'.")
 
-    p.add_argument("--eigvals", type=str, default=None, help="Eigenvalues file (skips first 3 lines).")
+    p.add_argument("--eigvals", type=str, default=None, help="XATU .eigval file, for energies in the titles.")
     p.add_argument("--deg-thresh", type=float, default=None,
-                   help="Threshold for combining degenerate pairs (e.g. 1e-3). Disabled if omitted.")
+                   help="Sum states whose eigenvalues differ by at most this (e.g. 1e-3). Disabled if omitted.")
 
     p.add_argument("--interp", choices=["flat", "gouraud", "tri"], default="flat",
                    help="Color interpolation: flat/gouraud shading on triangulation, or 'tri' regular-grid interpolation.")
@@ -231,32 +170,22 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--cmap", type=str, default="viridis", help="Matplotlib colormap name.")
     p.add_argument("--format", choices=["pdf", "png"], default="pdf", help="Output format.")
     p.add_argument("--out", type=str, default=None, help="Output base path (e.g. 'out/run1').")
-    p.add_argument("--dpi", type=int, default=600, help="PNG DPI.")
+    p.add_argument("--dpi", type=int, default=150, help="PNG DPI.")
     p.add_argument("--font-size", type=int, default=15, help="Base font size.")
     p.add_argument("--no-latex", action="store_true", help="Disable LaTeX text rendering.")
     p.add_argument("--xlabel", default=r"$k_x$ (Å$^{-1}$)", help="X axis label.")
     p.add_argument("--ylabel", default=r"$k_y$ (Å$^{-1}$)", help="Y axis label.")
 
-    # Square is now the default; provide an opt-out.
-    p.add_argument("--square", action="store_true", help="(Deprecated) Square aspect ratio (now default).")
-    p.add_argument("--no-square", action="store_true", help="Disable square aspect/extent.")
+    p.add_argument("--no-square", dest="square", action="store_false", help="Disable square aspect/extent.")
 
     p.add_argument("--xlim", type=float, default=None, help="Override |kx| limit (default: auto from data).")
     p.add_argument("--ylim", type=float, default=None, help="Override |ky| limit (default: auto from data).")
     p.add_argument("-v", "--verbose", action="store_true", help="Verbose logging.")
-    p.add_argument("--version", action="version", version="kwf_plot.py 2.1")
-
-    # Make square the default behavior
-    p.set_defaults(square=True)
     return p
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = build_parser().parse_args(argv)
-
-    # Resolve square vs no-square
-    if getattr(args, "no_square", False):
-        args.square = False  # explicit opt-out
 
     configure_matplotlib(fontsize=args.font_size, latex=not args.no_latex)
 
@@ -271,7 +200,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             print("No valid state indices selected.", file=sys.stderr)
             return 2
         states = [states[i] for i in idxs]
-        titles = make_titles(len(states))
+        titles = make_titles(idxs)
         eig_slice = idxs
     else:
         n = args.n_states
@@ -282,7 +211,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"Requested {n} states, but file contains only {total_states}.", file=sys.stderr)
             return 2
         states = states[:n]
-        titles = make_titles(n)
+        titles = make_titles(list(range(n)))
         eig_slice = list(range(n))
 
     # Eigenvalues (optional)
@@ -290,7 +219,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         eigvals_all = read_eigenvalues(args.eigvals, max(eig_slice) + 1)
         eigvals = eigvals_all[eig_slice]
         if args.deg_thresh is not None and args.deg_thresh > 0:
-            states, titles = combine_degenerate_states(eigvals, states, threshold=args.deg_thresh)
+            states, titles = combine_degenerate_states(eigvals, states, eig_slice, threshold=args.deg_thresh)
         else:
             titles = [f"{t}  E={e:.6f}" for t, e in zip(titles, eigvals)]
 
@@ -326,7 +255,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         set_axes(ax, xlim, ylim, args.xlabel, args.ylabel, title, square=args.square)
 
         cbar = fig.colorbar(mappable, fraction=0.046, pad=0.04, ax=ax)
-        cbar.set_label("Amplitude")
+        cbar.set_label(r"$|A|^2$")
 
         figs.append(fig)
 
