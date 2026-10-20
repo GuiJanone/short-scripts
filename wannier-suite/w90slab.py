@@ -8,200 +8,20 @@ Initial target:
 The slab Hamiltonian uses the enlarged basis:
     I = m + l * mSize
 
+If the input has an overlap section (non-orthogonal basis), the slab overlap is
+built with the same layer map and written out. Input matrices are divided by
+their degeneracies on load, so the slab file is written with degeneracy 1.
+
 No external/static confinement potential is added here.
 """
 
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
-from pathlib import Path
 
 import numpy as np
 
-
-@dataclass
-class TbData:
-    bravais: np.ndarray
-    m_size: int
-    n_fock: int
-    degen: np.ndarray
-    i_rn: np.ndarray
-    h_r: np.ndarray
-    wf: np.ndarray | None
-    diag_index: int | None
-
-
-def parse_tb_dat(filename: str | Path) -> TbData:
-    path = Path(filename)
-
-    with path.open("r", encoding="utf-8") as handle:
-        line_number = 0
-
-        def next_nonempty_line(handle):
-            nonlocal line_number
-
-            while True:
-                line = handle.readline()
-
-                if line == "":
-                    return None
-
-                line_number += 1
-                stripped = line.strip()
-
-                if stripped:
-                    return line_number, stripped
-
-        def required_nonempty_line(description: str) -> tuple[int, str]:
-            result = next_nonempty_line(handle)
-
-            if result is None:
-                raise ValueError(f"Unexpected end of file while reading {description}.")
-
-            return result
-
-        def parse_r_vector(
-            text: str,
-            line_number: int,
-            description: str,
-        ) -> tuple[int, int, int]:
-            parts = text.split()
-
-            if len(parts) < 3:
-                raise ValueError(
-                    f"Expected Rx Ry Rz for {description} at line {line_number}: {text}"
-                )
-
-            try:
-                return int(parts[0]), int(parts[1]), int(parts[2])
-            except ValueError as exc:
-                raise ValueError(
-                    f"Invalid Rx Ry Rz for {description} at line {line_number}: {text}"
-                ) from exc
-
-        def check_orbital_indices(i: int, j: int, line_number: int, text: str) -> None:
-            if not (0 <= i < m_size and 0 <= j < m_size):
-                raise ValueError(
-                    f"Orbital index out of range at line {line_number}: {text}"
-                )
-
-        # Header
-        header = handle.readline()
-        if header == "":
-            raise ValueError("Unexpected end of file while reading header.")
-        line_number += 1
-
-        bravais = np.zeros((3, 3), dtype=float)
-        for vec_index in range(3):
-            ln, text = required_nonempty_line(f"Bravais vector {vec_index + 1}")
-            parts = text.split()
-
-            if len(parts) < 3:
-                raise ValueError(f"Expected 3 Bravais components at line {ln}: {text}")
-
-            bravais[vec_index] = [float(x) for x in parts[:3]]
-
-        _, text = required_nonempty_line("mSize")
-        m_size = int(text.split()[0])
-
-        _, text = required_nonempty_line("nFock")
-        n_fock = int(text.split()[0])
-
-        degen_values = []
-        while len(degen_values) < n_fock:
-            ln, text = required_nonempty_line("degeneracy list")
-            parts = text.split()
-
-            try:
-                degen_values.extend(int(x) for x in parts)
-            except ValueError as exc:
-                raise ValueError(f"Invalid degeneracy value at line {ln}: {text}") from exc
-
-        degen = np.array(degen_values[:n_fock], dtype=int)
-
-        i_rn = np.zeros((n_fock, 3), dtype=int)
-        h_r = np.zeros((n_fock, m_size, m_size), dtype=complex)
-
-        for block in range(n_fock):
-            ln, text = required_nonempty_line(f"H block {block} translation")
-            i_rn[block] = parse_r_vector(text, ln, f"H block {block}")
-
-            for entry in range(m_size * m_size):
-                ln, text = required_nonempty_line(
-                    f"H block {block} entry {entry + 1}"
-                )
-                parts = text.split()
-
-                if len(parts) < 4:
-                    raise ValueError(
-                        f"Expected i j real imag for H block {block} at line {ln}: {text}"
-                    )
-
-                try:
-                    i = int(parts[0]) - 1
-                    j = int(parts[1]) - 1
-                    value = float(parts[2]) + 1j * float(parts[3])
-                except ValueError as exc:
-                    raise ValueError(
-                        f"Invalid H matrix entry for block {block} at line {ln}: {text}"
-                    ) from exc
-
-                check_orbital_indices(i, j, ln, text)
-                h_r[block, i, j] = value
-
-        wf = None
-        first_wf_line = next_nonempty_line(handle)
-
-        if first_wf_line is not None:
-            wf = np.zeros((n_fock, m_size, m_size, 3), dtype=complex)
-
-            for block in range(n_fock):
-                if block == 0:
-                    ln, text = first_wf_line
-                else:
-                    ln, text = required_nonempty_line(f"WF block {block} translation")
-
-                parse_r_vector(text, ln, f"WF block {block}")
-
-                for entry in range(m_size * m_size):
-                    ln, text = required_nonempty_line(
-                        f"WF block {block} entry {entry + 1}"
-                    )
-                    parts = text.split()
-
-                    if len(parts) < 8:
-                        raise ValueError(
-                            f"Expected i j rx_real rx_imag ry_real ry_imag "
-                            f"rz_real rz_imag for WF block {block} at line {ln}: {text}"
-                        )
-
-                    try:
-                        i = int(parts[0]) - 1
-                        j = int(parts[1]) - 1
-                        wf[block, i, j, 0] = float(parts[2]) + 1j * float(parts[3])
-                        wf[block, i, j, 1] = float(parts[4]) + 1j * float(parts[5])
-                        wf[block, i, j, 2] = float(parts[6]) + 1j * float(parts[7])
-                    except ValueError as exc:
-                        raise ValueError(
-                            f"Invalid WF matrix entry for block {block} at line {ln}: {text}"
-                        ) from exc
-
-                    check_orbital_indices(i, j, ln, text)
-
-    matches = np.where(np.all(i_rn == np.array([0, 0, 0]), axis=1))[0]
-    diag_index = int(matches[0]) if len(matches) > 0 else None
-
-    return TbData(
-        bravais=bravais,
-        m_size=m_size,
-        n_fock=n_fock,
-        degen=degen,
-        i_rn=i_rn,
-        h_r=h_r,
-        wf=wf,
-        diag_index=diag_index,
-    )
+from w90tb import TbData, read_tb, write_tb
 
 
 def build_z_slab(
@@ -432,294 +252,12 @@ def build_z_slab_wf_approx(
     return wf_dict
 
 
-def write_tb_dat(
-    filename: str | Path,
-    bravais: np.ndarray,
-    slab_i_rn: np.ndarray,
-    slab_h: np.ndarray,
-    write_empty_wf: bool = False,
-    wf_centers: np.ndarray | None = None,
-    slab_wf: np.ndarray | None = None,
-) -> None:
-    """
-    Write a simple Wannier90-like _tb.dat file.
-
-    Degeneracies are set to 1 for all slab hopping blocks.
-    """
-    path = Path(filename)
-    n_fock = slab_h.shape[0]
-    m_size = slab_h.shape[1]
-    write_wf = write_empty_wf or wf_centers is not None or slab_wf is not None
-    slab_diag_block = None
-
-    if slab_wf is not None and slab_wf.shape != (n_fock, m_size, m_size, 3):
-        raise ValueError(
-            "Slab WF block must have shape "
-            f"({n_fock}, {m_size}, {m_size}, 3), got {slab_wf.shape}."
-        )
-
-    if wf_centers is not None:
-        if wf_centers.shape != (m_size, 3):
-            raise ValueError(
-                f"WF centers must have shape ({m_size}, 3), got {wf_centers.shape}."
-            )
-
-        matches = np.where(np.all(slab_i_rn == np.array([0, 0, 0]), axis=1))[0]
-        if len(matches) == 0:
-            raise ValueError("Cannot write WF centers: slab R=(0,0,0) block not found.")
-
-        slab_diag_block = int(matches[0])
-
-    with path.open("w", encoding="utf-8") as handle:
-        handle.write("Slab tight-binding model generated from bulk seedname_tb.dat\n")
-
-        for vec in bravais:
-            handle.write(f"{vec[0]:22.14f} {vec[1]:22.14f} {vec[2]:22.14f}\n")
-
-        handle.write(f"{m_size:d}\n")
-        handle.write(f"{n_fock:d}\n")
-
-        for start in range(0, n_fock, 15):
-            values = ["1" for _ in range(start, min(start + 15, n_fock))]
-            handle.write(" ".join(values) + "\n")
-
-        handle.write("\n")
-
-        for block in range(n_fock):
-            rx, ry, rz = slab_i_rn[block]
-            handle.write(f"{rx:5d} {ry:5d} {rz:5d}\n")
-
-            for i in range(m_size):
-                for j in range(m_size):
-                    value = slab_h[block, i, j]
-                    handle.write(
-                        f"{i + 1:5d} {j + 1:5d} "
-                        f"{value.real:22.14e} {value.imag:22.14e}\n"
-                    )
-
-            handle.write("\n")
-
-        if write_wf:
-            for block in range(n_fock):
-                rx, ry, rz = slab_i_rn[block]
-                handle.write(f"{rx:5d} {ry:5d} {rz:5d}\n")
-
-                for i in range(m_size):
-                    for j in range(m_size):
-                        if slab_wf is not None:
-                            value = slab_wf[block, i, j]
-                        elif block == slab_diag_block and i == j:
-                            center = wf_centers[i]
-                            value = center.astype(complex)
-                        else:
-                            value = np.zeros(3, dtype=complex)
-
-                        handle.write(
-                            f"{i + 1:5d} {j + 1:5d} "
-                            f"{value[0].real:22.14e} {value[0].imag:22.14e} "
-                            f"{value[1].real:22.14e} {value[1].imag:22.14e} "
-                            f"{value[2].real:22.14e} {value[2].imag:22.14e}\n"
-                        )
-
-                handle.write("\n")
-
-
-def validate_xatu_format(filename: str | Path) -> bool:
-    """
-    Validate the strict block layout expected by XATU's Wannier90 parser.
-    """
-    path = Path(filename)
-    lines = path.read_text(encoding="utf-8").splitlines()
-
-    def text_at(index: int) -> str:
-        if index >= len(lines):
-            return "<EOF>"
-        return lines[index]
-
-    def fail(index: int, block: int | None, message: str) -> bool:
-        line_number = index + 1 if index < len(lines) else len(lines) + 1
-        block_text = "n/a" if block is None else str(block)
-        print(
-            f"XATU format validation failed at line {line_number}, "
-            f"block {block_text}: {message}"
-        )
-        print(f"Offending text: {text_at(index)!r}")
-        return False
-
-    def require_line(index: int, block: int | None, description: str) -> bool:
-        if index >= len(lines):
-            return fail(index, block, f"expected {description}")
-        return True
-
-    cursor = 0
-
-    if not require_line(cursor, None, "header"):
-        return False
-    cursor += 1
-
-    for vec_index in range(3):
-        if not require_line(cursor, None, f"Bravais vector {vec_index + 1}"):
-            return False
-
-        parts = lines[cursor].split()
-        if len(parts) != 3:
-            return fail(cursor, None, "Bravais vector must have exactly 3 fields")
-
-        try:
-            [float(part) for part in parts]
-        except ValueError:
-            return fail(cursor, None, "Bravais vector contains a non-float field")
-
-        cursor += 1
-
-    if not require_line(cursor, None, "mSize"):
-        return False
-    parts = lines[cursor].split()
-    if len(parts) != 1:
-        return fail(cursor, None, "mSize line must have exactly 1 field")
-    try:
-        m_size = int(parts[0])
-    except ValueError:
-        return fail(cursor, None, "mSize is not an integer")
-    cursor += 1
-
-    if not require_line(cursor, None, "nFock"):
-        return False
-    parts = lines[cursor].split()
-    if len(parts) != 1:
-        return fail(cursor, None, "nFock line must have exactly 1 field")
-    try:
-        n_fock = int(parts[0])
-    except ValueError:
-        return fail(cursor, None, "nFock is not an integer")
-    cursor += 1
-
-    degen_read = 0
-    while degen_read < n_fock:
-        if not require_line(cursor, None, "degeneracy line"):
-            return False
-
-        parts = lines[cursor].split()
-        if not parts:
-            return fail(cursor, None, "blank line before full degeneracy list")
-
-        try:
-            [int(part) for part in parts]
-        except ValueError:
-            return fail(cursor, None, "degeneracy line contains a non-integer field")
-
-        degen_read += len(parts)
-        cursor += 1
-
-    if degen_read != n_fock:
-        return fail(
-            cursor - 1,
-            None,
-            f"degeneracy list has {degen_read} values, expected {n_fock}",
-        )
-
-    if not require_line(cursor, None, "blank line after degeneracy list"):
-        return False
-    if lines[cursor] != "":
-        return fail(cursor, None, "expected exactly one blank line after degeneracy list")
-    cursor += 1
-
-    for block in range(n_fock):
-        if not require_line(cursor, block, "H block translation"):
-            return False
-
-        parts = lines[cursor].split()
-        if len(parts) != 3:
-            return fail(cursor, block, "H block translation must have exactly 3 fields")
-
-        try:
-            [int(part) for part in parts]
-        except ValueError:
-            return fail(cursor, block, "H block translation contains a non-integer field")
-
-        cursor += 1
-
-        for _entry in range(m_size * m_size):
-            if not require_line(cursor, block, "H matrix entry"):
-                return False
-
-            text = lines[cursor]
-            parts = text.split()
-            if len(parts) != 4:
-                return fail(cursor, block, "H entry must have exactly 4 fields")
-
-            try:
-                i = int(parts[0])
-                j = int(parts[1])
-                float(parts[2])
-                float(parts[3])
-            except ValueError:
-                return fail(cursor, block, "H entry has invalid numeric fields")
-
-            if not (1 <= i <= m_size and 1 <= j <= m_size):
-                return fail(cursor, block, "H entry indices are outside 1..mSize")
-
-            cursor += 1
-
-        if not require_line(cursor, block, "blank line after H block"):
-            return False
-        if lines[cursor] != "":
-            return fail(cursor, block, "expected exactly one blank line after H block")
-        cursor += 1
-
-    for block in range(n_fock):
-        if not require_line(cursor, block, "Rhop block translation"):
-            return False
-
-        parts = lines[cursor].split()
-        if len(parts) != 3:
-            return fail(cursor, block, "Rhop block translation must have exactly 3 fields")
-
-        try:
-            [int(part) for part in parts]
-        except ValueError:
-            return fail(cursor, block, "Rhop block translation contains a non-integer field")
-
-        cursor += 1
-
-        for _entry in range(m_size * m_size):
-            if not require_line(cursor, block, "Rhop matrix entry"):
-                return False
-
-            parts = lines[cursor].split()
-            if len(parts) != 8:
-                return fail(cursor, block, "Rhop entry must have exactly 8 fields")
-
-            try:
-                i = int(parts[0])
-                j = int(parts[1])
-                [float(part) for part in parts[2:]]
-            except ValueError:
-                return fail(cursor, block, "Rhop entry has invalid numeric fields")
-
-            if not (1 <= i <= m_size and 1 <= j <= m_size):
-                return fail(cursor, block, "Rhop entry indices are outside 1..mSize")
-
-            cursor += 1
-
-        if not require_line(cursor, block, "blank line after Rhop block"):
-            return False
-        if lines[cursor] != "":
-            return fail(cursor, block, "expected exactly one blank line after Rhop block")
-        cursor += 1
-
-    print(
-        f"XATU format validation passed: read {n_fock} H blocks and "
-        f"{n_fock} Rhop blocks."
-    )
-    return True
-
-
 def print_tb_diagnostics(tb: TbData) -> None:
     print("Parsed bulk TB:")
     print(f"  m_size = {tb.m_size}")
     print(f"  n_fock = {tb.n_fock}")
     print(f"  has WF block = {tb.wf is not None}")
+    print(f"  has overlap = {tb.overlap is not None}")
     print(f"  diag_index = {tb.diag_index}")
     print("  R range:")
     print(f"      Rx {np.min(tb.i_rn[:, 0])} / {np.max(tb.i_rn[:, 0])}")
@@ -731,10 +269,17 @@ def diagonalize_gamma(
     slab_i_rn: np.ndarray,
     slab_h: np.ndarray,
     bravais: np.ndarray,
+    slab_s: np.ndarray | None = None,
 ) -> np.ndarray:
-    h_gamma = build_hk_2d(slab_i_rn, slab_h, bravais, np.zeros(3, dtype=float))
-    eigvals = np.linalg.eigvalsh(h_gamma)
-    return eigvals
+    """Gamma eigenvalues; solves H c = E S c via Cholesky when an overlap is given."""
+    k0 = np.zeros(3, dtype=float)
+    h_gamma = build_hk_2d(slab_i_rn, slab_h, bravais, k0)
+    if slab_s is not None:
+        s_gamma = build_hk_2d(slab_i_rn, slab_s, bravais, k0)
+        chol = np.linalg.cholesky(s_gamma)
+        y = np.linalg.solve(chol, h_gamma)
+        h_gamma = np.linalg.solve(chol, y.conj().T).conj().T
+    return np.linalg.eigvalsh(h_gamma)
 
 
 def main() -> None:
@@ -799,7 +344,7 @@ def main() -> None:
             "cutting. Use a pre-oriented conventional/surface cell for now."
         )
 
-    tb = parse_tb_dat(args.input)
+    tb = read_tb(args.input).normalized()
     print_tb_diagnostics(tb)
     print(
         "Slab direction z means finite along the third input lattice vector a3.\n"
@@ -816,6 +361,18 @@ def main() -> None:
         direction=args.direction,
         vacuum=args.vacuum,
     )
+
+    slab_s = None
+    if tb.overlap is not None:
+        _, _, slab_s = build_slab_hoppings(
+            bravais=tb.bravais,
+            i_rn=tb.i_rn,
+            h_r=tb.overlap,
+            m_size=tb.m_size,
+            n_layers=args.layers,
+            direction=args.direction,
+            vacuum=args.vacuum,
+        )
 
     centers = None
     needs_centers = (
@@ -857,14 +414,26 @@ def main() -> None:
     elif args.write_centers_wf and centers is None:
         print("Warning: could not write centers WF because slab centers are unavailable.")
 
-    write_tb_dat(
-        filename=args.output,
-        bravais=bravais_slab,
-        slab_i_rn=slab_i_rn,
-        slab_h=slab_h,
-        write_empty_wf=args.write_empty_wf,
-        wf_centers=centers if args.write_centers_wf else None,
-        slab_wf=slab_wf,
+    if slab_wf is None and (args.write_empty_wf or args.write_centers_wf or slab_s is not None):
+        # zero PME block, optionally with slab centers on the R=(0,0) diagonal
+        slab_wf = np.zeros((len(slab_i_rn), slab_h.shape[1], slab_h.shape[2], 3), dtype=complex)
+        if args.write_centers_wf and centers is not None:
+            home = np.where(np.all(slab_i_rn == 0, axis=1))[0]
+            if len(home) == 0:
+                raise ValueError("Cannot write WF centers: slab R=(0,0,0) block not found.")
+            slab_wf[home[0], np.arange(len(centers)), np.arange(len(centers))] = centers
+
+    write_tb(
+        args.output,
+        TbData(
+            header="Slab tight-binding model generated from bulk seedname_tb.dat",
+            bravais=bravais_slab,
+            degen=np.ones(len(slab_i_rn), dtype=int),
+            i_rn=slab_i_rn,
+            h_r=slab_h,
+            wf=slab_wf,
+            overlap=slab_s,
+        ),
     )
 
     print(f"Wrote slab TB file: {args.output}")
@@ -878,7 +447,7 @@ def main() -> None:
 
     if args.check:
         err = check_hermiticity(slab_i_rn, slab_h, bravais_slab)
-        eigvals = diagonalize_gamma(slab_i_rn, slab_h, bravais_slab)
+        eigvals = diagonalize_gamma(slab_i_rn, slab_h, bravais_slab, slab_s)
 
         print(f"Gamma Hermiticity max abs error: {err:.6e}")
         if args.layers == 1:

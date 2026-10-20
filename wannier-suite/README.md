@@ -10,7 +10,9 @@ optional overlap section appended by crystal2wannier).
 
       python w90field.py seedname_tb.dat 0.01 -d z -o field_tb.dat
 
-- `w90slab.py` – build finite slabs (has its own parser; does not yet carry the overlap).
+- `w90slab.py` – build finite z-slabs; builds and writes the slab overlap too, and `--check` solves the generalized problem `H c = E S c`. Input is divided by the degeneracies, so the slab file has degeneracy 1.
 - `w90lattice.py` – plot position matrix elements / write Wannier centres.
+
+All scripts share `w90tb.py` for I/O (run them from this directory).
 
 `w90field.py` replaces the old Fortran `utilities/w90_field`.

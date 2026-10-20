@@ -5,8 +5,8 @@ overlap section appended by crystal2wannier (non-orthogonal basis).
 File layout (blocks separated by blank lines):
     header, a1, a2, a3, mSize, nFock, degeneracies (15 per line)
     nFock blocks:  R1 R2 R3, then mSize^2 lines "i j Re Im"            -> H(R)
-    nFock blocks:  R1 R2 R3, then mSize^2 lines "i j Rx Ix Ry Iy Rz Iz" -> r(R)
-    optional, nFock blocks like H                                        -> S(R)
+    optional, nFock blocks: R1 R2 R3, then mSize^2 lines "i j Rx Ix Ry Iy Rz Iz" -> r(R)
+    optional (needs r), nFock blocks like H                                       -> S(R)
 
 All matrices are stored raw (not divided by the degeneracy), as in the file.
 """
@@ -26,7 +26,7 @@ class TbData:
     degen: np.ndarray              # (nFock,)
     i_rn: np.ndarray               # (nFock, 3)
     h_r: np.ndarray                # (nFock, m, m)
-    wf: np.ndarray                 # (nFock, m, m, 3) position matrix elements
+    wf: np.ndarray | None          # (nFock, m, m, 3) position matrix elements, or None if absent
     overlap: np.ndarray | None     # (nFock, m, m) or None if orthogonal basis
 
     @property
@@ -36,6 +36,22 @@ class TbData:
     @property
     def n_fock(self) -> int:
         return self.h_r.shape[0]
+
+    @property
+    def diag_index(self) -> int | None:
+        """Index of the R=(0,0,0) block, if present."""
+        m = np.where(np.all(self.i_rn == 0, axis=1))[0]
+        return int(m[0]) if len(m) else None
+
+    def normalized(self) -> "TbData":
+        """Copy with every matrix divided by its degeneracy (degen set to 1), as XATU does on load."""
+        w = self.degen[:, None, None].astype(float)
+        return TbData(
+            self.header, self.bravais, np.ones_like(self.degen), self.i_rn,
+            self.h_r / w,
+            None if self.wf is None else self.wf / w[..., None],
+            None if self.overlap is None else self.overlap / w,
+        )
 
 
 def _block(lines: list[str], start: int, m_size: int, ncols: int) -> np.ndarray:
@@ -93,8 +109,9 @@ def read_tb(filename: str | Path) -> TbData:
         i_rn[n] = [int(x) for x in lines[pos + n * stride].split()[:3]]
 
     h_r, pos = _read_section(lines, pos, n_fock, m_size, 4, i_rn, "Hamiltonian")
-    wf, pos = _read_section(lines, pos, n_fock, m_size, 8, i_rn, "Position")
-    overlap = None
+    wf = overlap = None
+    if pos < len(lines):
+        wf, pos = _read_section(lines, pos, n_fock, m_size, 8, i_rn, "Position")
     if pos < len(lines):
         overlap, pos = _read_section(lines, pos, n_fock, m_size, 4, i_rn, "Overlap")
         if pos < len(lines):
@@ -128,6 +145,9 @@ def write_tb(filename: str | Path, tb: TbData) -> None:
             fh.write(" ".join(str(d) for d in tb.degen[s : s + 15]) + "\n")
         fh.write("\n")
         _write_section(fh, tb.i_rn, tb.h_r[..., None])
-        _write_section(fh, tb.i_rn, tb.wf)
+        if tb.wf is None and tb.overlap is not None:
+            raise ValueError("Cannot write an overlap section without a position-matrix section.")
+        if tb.wf is not None:
+            _write_section(fh, tb.i_rn, tb.wf)
         if tb.overlap is not None:
             _write_section(fh, tb.i_rn, tb.overlap[..., None])

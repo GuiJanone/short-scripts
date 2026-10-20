@@ -18,6 +18,7 @@ import matplotlib.cm as cm
 import matplotlib.colors as mcolors
 import sys
 import argparse
+from w90tb import read_tb
 
 #===============================================================#
 # PARSER
@@ -32,94 +33,8 @@ args = parser.parse_args()
 filename = args.filename
 raw_centres_flag = args.raw_centres
 def parse_file(filename):
-    with open(filename, 'r') as file:
-        # Skip the header
-        for _ in range(1):
-            next(file)
-
-        # Read bravais vectors (a1, a2, a3)
-        bravais_vectors = []
-        for _ in range(3):
-            line = next(file).strip()
-            bravais_vectors.append([float(x) for x in line.split()])
-
-        # Read nFock and mSize
-        mSize = int(next(file).strip())
-        nFock = int(next(file).strip())
-
-        degen = np.zeros(nFock, dtype=int)
-        degen_per_line = 15
-        num_lines = nFock // degen_per_line  # Number of full lines
-        remainder = nFock % degen_per_line  # Remaining integers
-
-        # Read full lines of 15 integers
-        for i in range(num_lines):
-            line = next(file).strip()
-            integers = list(map(int, line.split()))
-            degen[i * degen_per_line : (i + 1) * degen_per_line] = integers
-
-        # Read the remaining integers (if any)
-        if remainder > 0:
-            line = next(file).strip()
-            integers = list(map(int, line.split()))
-            degen[num_lines * degen_per_line : num_lines * degen_per_line + remainder] = integers[:remainder]
-
-        next(file)
-        # Initialize the first set of Fock matrices (nFock x mSize x mSize)
-        H = np.zeros((nFock, mSize, mSize), dtype=complex)
-        iRn = np.zeros((nFock, 3), dtype=int)
-
-        # Parse the first set of nFock matrices
-        for n in range(nFock):
-            # Read the iRn indices (X, Y, Z)
-            iRn[n] = [int(x) for x in next(file).strip().split()]
-            # Read the mSize x mSize matrix
-            for _ in range(mSize * mSize):
-                line = next(file).strip()
-                if line:  # Skip empty lines
-                    i, j, real, imag = map(float, line.split())
-                    H[n, int(i)-1, int(j)-1] = complex(real, imag)
-
-            # Skip the blank line between matrices
-            next(file)
-
-        # Initialize the second set of Fock matrices for Rhop (nFock x mSize x mSize x 3)
-        WF = np.zeros((nFock, mSize, mSize, 3), dtype=complex)
-
-        # Parse the second set of nFock matrices (with X, Y, Z components)
-        for n in range(nFock):
-            line = next(file)
-            iRn_tmp = line
-
-            # Read the mSize x mSize matrix with X, Y, Z components -- ONLY DIAGONALS
-            for _ in range(mSize * mSize):
-                line = next(file).strip()
-                if line:  # Skip empty lines
-                    parts = list(map(float, line.split()))
-                    i, j = int(parts[0]), int(parts[1])
-                    if (i==j):          # get only diagonal
-                        real_x, imag_x = parts[2], parts[3]
-                        real_y, imag_y = parts[4], parts[5]
-                        real_z, imag_z = parts[6], parts[7]
-                        WF[n, i-1, j-1, 0] = complex(real_x, imag_x)  # X component
-                        WF[n, i-1, j-1, 1] = complex(real_y, imag_y)  # Y component
-                        WF[n, i-1, j-1, 2] = complex(real_z, imag_z)  # Z component
-
-            # Skip the blank line between matrices
-            if (n+1 == nFock):
-                break;
-            else:
-                next(file)
-
-
-        # Determine which block corresponds to R = (0,0,0)
-        diag_indices = np.where(np.all(iRn == 0, axis=1))[0]
-        if diag_indices.size > 0:
-            diag = int(diag_indices[0])
-        else:
-            diag = None
-
-    return np.array(bravais_vectors), nFock, mSize, iRn, H, WF, diag  # Second set of Fock matrices (nFock x mSize x mSize x 3)
+    tb = read_tb(filename)
+    return tb.bravais, tb.n_fock, tb.m_size, tb.i_rn, tb.h_r, tb.wf, tb.diag_index
 
 #==============================================================#
 #==========================PLOTTING============================#
