@@ -151,3 +151,41 @@ def write_tb(filename: str | Path, tb: TbData) -> None:
             _write_section(fh, tb.i_rn, tb.wf)
         if tb.overlap is not None:
             _write_section(fh, tb.i_rn, tb.overlap[..., None])
+
+
+def block_hermiticity_error(i_rn, arr, bravais=None, overlap=None) -> float:
+    """
+    max |arr(R)_ab^* - arr(-R)_ba| over blocks whose -R partner exists.
+
+    For a position block (arr.ndim == 4) the exact relation, r_ab(R) = <0a|r|Rb>, is
+        r_ab(R)^* = r_ba(-R) + R_cart S_ba(-R)
+    so `bravais` is required and `overlap` is S (None = orthogonal: S = delta at R=0).
+    """
+    idx = {tuple(r): n for n, r in enumerate(i_rn)}
+    pos = arr.ndim == 4
+    if pos:
+        if bravais is None:
+            raise ValueError("bravais is required for the position-block check.")
+        if overlap is None:
+            overlap = np.zeros(arr.shape[:3], dtype=complex)
+            overlap[idx[(0, 0, 0)]] = np.eye(arr.shape[1])
+    err = 0.0
+    for n, r in enumerate(i_rn):
+        m = idx.get(tuple(-np.asarray(r)))
+        if m is None:
+            continue
+        rhs = np.swapaxes(arr[m], 0, 1)
+        if pos:
+            rhs = rhs + (np.asarray(r) @ bravais) * np.swapaxes(overlap[m], 0, 1)[..., None]
+        err = max(err, float(np.max(np.abs(arr[n].conj() - rhs))))
+    return err
+
+
+def min_overlap_eigenvalue(i_rn, overlap, nk: int = 20, seed: int = 0) -> float:
+    """Smallest eigenvalue of S(k) over Gamma and nk random k-points (should be > 0)."""
+    rng = np.random.default_rng(seed)
+    ks = np.vstack([np.zeros(3), rng.random((nk, 3))])
+    phases = np.exp(2j * np.pi * ks @ np.asarray(i_rn).T)        # (nk+1, nFock)
+    s_k = np.einsum("kn,nab->kab", phases, overlap)
+    s_k = (s_k + np.swapaxes(s_k.conj(), 1, 2)) / 2              # drop tiny asymmetry
+    return float(np.linalg.eigvalsh(s_k).min())

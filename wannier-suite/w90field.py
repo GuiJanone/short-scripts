@@ -14,7 +14,7 @@ Usage:  w90field.py seedname_tb.dat 0.01 [-d z] [-o field_tb.dat]
 
 import argparse
 
-from w90tb import read_tb, write_tb
+from w90tb import block_hermiticity_error, read_tb, write_tb
 
 AXES = {"x": 0, "y": 1, "z": 2}
 
@@ -37,8 +37,19 @@ def main() -> None:
     kind = "non-orthogonal (overlap found)" if tb.overlap is not None else "orthogonal"
     print(f"{args.input}: {tb.m_size} orbitals, {tb.n_fock} R-blocks, {kind} basis")
 
+    herm_before = block_hermiticity_error(tb.i_rn, tb.h_r)
+    apply_field(tb, args.amplitude, AXES[args.direction])
+    herm_after = block_hermiticity_error(tb.i_rn, tb.h_r)
+    if herm_after > max(1e-6, 10 * herm_before):
+        print(
+            f"Warning: H(R)_ab* vs H(-R)_ba mismatch grew from {herm_before:.2e} to {herm_after:.2e}. "
+            "With an overlap, r_ab(R)* = r_ba(-R) + R S_ba(-R), so a field component along a periodic "
+            "direction with S(R) != 0 makes the blocks non-Hermitian (the field breaks that periodicity). "
+            "Fine for a z-field on a slab (Rz = 0)."
+        )
+
     tb.header = f"Field applied = {args.amplitude} along {args.direction} | {tb.header.strip()}"
-    write_tb(args.output, apply_field(tb, args.amplitude, AXES[args.direction]))
+    write_tb(args.output, tb)
     print(f"Wrote {args.output}")
 
 

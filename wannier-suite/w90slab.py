@@ -21,7 +21,7 @@ import argparse
 
 import numpy as np
 
-from w90tb import TbData, read_tb, write_tb
+from w90tb import TbData, block_hermiticity_error, min_overlap_eigenvalue, read_tb, write_tb
 
 
 def build_z_slab(
@@ -135,25 +135,31 @@ def check_hermiticity(
     return float(err)
 
 
-def check_nz1_projection(tb: TbData, slab_i_rn: np.ndarray, slab_h: np.ndarray) -> float:
+def check_nz1_projection(
+    i_rn: np.ndarray,
+    bulk: np.ndarray,
+    slab_i_rn: np.ndarray,
+    slab: np.ndarray,
+) -> float:
     """
     For Nz = 1, the slab must match the bulk model projected to Rz = 0.
+    Works for H, S (nFock, m, m) and the position block (nFock, m, m, 3).
     """
     projected: dict[tuple[int, int], np.ndarray] = {}
 
-    for block, (rx, ry, rz) in enumerate(tb.i_rn):
+    for block, (rx, ry, rz) in enumerate(i_rn):
         if rz != 0:
             continue
 
         key = (int(rx), int(ry))
 
         if key not in projected:
-            projected[key] = np.zeros((tb.m_size, tb.m_size), dtype=complex)
+            projected[key] = np.zeros_like(bulk[0])
 
-        projected[key] += tb.h_r[block]
+        projected[key] += bulk[block]
 
     slab_by_key = {
-        (int(rx), int(ry)): slab_h[block]
+        (int(rx), int(ry)): slab[block]
         for block, (rx, ry, _rz) in enumerate(slab_i_rn)
     }
 
@@ -209,17 +215,30 @@ def extract_z_slab_centers(tb: TbData, nz: int) -> np.ndarray | None:
 def build_z_slab_wf_approx(
     i_rn: np.ndarray,
     wf: np.ndarray,
+    overlap: np.ndarray | None,
+    a3: np.ndarray,
     m_size: int,
     n_layers: int,
-    centers: np.ndarray,
 ) -> dict[tuple[int, int], np.ndarray]:
     """
     Build an approximate slab position matrix using the same layer map as H.
+
+    r_ab(R) = <0a|r|Rb> is measured from the cell of orbital a, so for layer l
+
+        <l a| r |l' b>(Rx,Ry) = r_bulk(Rx,Ry,l'-l)_ab + l * a3 * S_bulk(Rx,Ry,l'-l)_ab
+
+    For an orthogonal basis S = delta at R=0 and this is just the l*a3 shift of the
+    centres; with an overlap, every S(R) block contributes. Inputs must be
+    degeneracy-normalised.
 
     This preserves the bulk in-plane position-matrix structure, but it is not a
     fully re-Wannierized slab PME and should not be trusted blindly for optical
     matrix elements involving surface states.
     """
+    if overlap is None:
+        overlap = np.zeros((len(i_rn), m_size, m_size), dtype=complex)
+        overlap[np.where(np.all(i_rn == 0, axis=1))[0]] = np.eye(m_size)
+
     slab_size = m_size * n_layers
     wf_dict: dict[tuple[int, int], np.ndarray] = {}
 
@@ -243,11 +262,7 @@ def build_z_slab_wf_approx(
                 row_start : row_start + m_size,
                 col_start : col_start + m_size,
                 :,
-            ] += wf[block]
-
-    if (0, 0) in wf_dict:
-        for i in range(slab_size):
-            wf_dict[(0, 0)][i, i, :] = centers[i]
+            ] += wf[block] + layer * overlap[block][..., None] * a3
 
     return wf_dict
 
@@ -276,7 +291,13 @@ def diagonalize_gamma(
     h_gamma = build_hk_2d(slab_i_rn, slab_h, bravais, k0)
     if slab_s is not None:
         s_gamma = build_hk_2d(slab_i_rn, slab_s, bravais, k0)
-        chol = np.linalg.cholesky(s_gamma)
+        try:
+            chol = np.linalg.cholesky(s_gamma)
+        except np.linalg.LinAlgError as exc:
+            raise ValueError(
+                "Slab overlap S(Gamma) is not positive definite; the Wannier90 R-cutoff "
+                "probably truncated S. Generalized diagonalization is not possible."
+            ) from exc
         y = np.linalg.solve(chol, h_gamma)
         h_gamma = np.linalg.solve(chol, y.conj().T).conj().T
     return np.linalg.eigvalsh(h_gamma)
@@ -375,11 +396,7 @@ def main() -> None:
         )
 
     centers = None
-    needs_centers = (
-        args.write_centers_wf
-        or args.write_approx_full_wf
-        or args.save_centers is not None
-    )
+    needs_centers = args.write_centers_wf or args.save_centers is not None
 
     if needs_centers:
         centers = extract_z_slab_centers(tb, args.layers)
@@ -389,15 +406,13 @@ def main() -> None:
     if args.write_approx_full_wf:
         if tb.wf is None:
             raise ValueError("Cannot write approximate full WF: input WF block is absent.")
-        if centers is None:
-            raise ValueError("Cannot write approximate full WF: slab centers unavailable.")
-
         wf_dict = build_z_slab_wf_approx(
             i_rn=tb.i_rn,
             wf=tb.wf,
+            overlap=tb.overlap,
+            a3=tb.bravais[2],
             m_size=tb.m_size,
             n_layers=args.layers,
-            centers=centers,
         )
         slab_wf = np.zeros(
             (len(slab_i_rn), slab_h.shape[1], slab_h.shape[2], 3),
@@ -450,9 +465,22 @@ def main() -> None:
         eigvals = diagonalize_gamma(slab_i_rn, slab_h, bravais_slab, slab_s)
 
         print(f"Gamma Hermiticity max abs error: {err:.6e}")
+        print(f"Block Hermiticity H(R)_ab* vs H(-R)_ba: {block_hermiticity_error(slab_i_rn, slab_h):.6e}")
+        if slab_s is not None:
+            print(f"Block Hermiticity S(R)_ab* vs S(-R)_ba: {block_hermiticity_error(slab_i_rn, slab_s):.6e}")
+            smin = min_overlap_eigenvalue(slab_i_rn, slab_s)
+            print(f"Smallest eigenvalue of slab S(k) (Gamma + random k): {smin:.6e}")
+            if smin <= 0:
+                print("Warning: slab overlap is not positive definite.")
+        if args.write_approx_full_wf:
+            perr = block_hermiticity_error(slab_i_rn, slab_wf, bravais_slab, slab_s)
+            print(f"Position block r_ab(R)* vs r_ba(-R) + R S_ba(-R): {perr:.6e}")
         if args.layers == 1:
-            projection_err = check_nz1_projection(tb, slab_i_rn, slab_h)
-            print(f"Nz=1 projection max abs error: {projection_err:.6e}")
+            print(f"Nz=1 projection max abs error (H): {check_nz1_projection(tb.i_rn, tb.h_r, slab_i_rn, slab_h):.6e}")
+            if slab_s is not None:
+                print(f"Nz=1 projection max abs error (S): {check_nz1_projection(tb.i_rn, tb.overlap, slab_i_rn, slab_s):.6e}")
+            if args.write_approx_full_wf:
+                print(f"Nz=1 projection max abs error (r): {check_nz1_projection(tb.i_rn, tb.wf, slab_i_rn, slab_wf):.6e}")
         print("Gamma eigenvalues:")
         for value in eigvals:
             print(f"{value:22.14e}")
